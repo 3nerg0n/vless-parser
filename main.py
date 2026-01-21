@@ -6,7 +6,7 @@ from github import Github
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URL = "https://etoneya.a9fm.site/1"
-FILE_PATH = "config"  # Файл без расширения
+FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
