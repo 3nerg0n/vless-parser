@@ -7,11 +7,11 @@ from github import Github
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URL = "https://etoneya.a9fm.site/1"
-FILE_PATH = "configs.txt" 
+# Меняем имя на config без расширения
+FILE_PATH = "config" 
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
-# Заголовки, чтобы сайт думал, что мы — браузер
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
@@ -24,7 +24,7 @@ def parse_vless_links(raw_data):
 
     lines = decoded_data.splitlines()
     filtered_links = []
-    target_keywords = ["germany", "netherlands", "nederland"]
+    target_keywords = ["germany", "netherlands"]
 
     for line in lines:
         line = line.strip()
@@ -33,7 +33,6 @@ def parse_vless_links(raw_data):
         try:
             parsed = urlparse(line)
             params = parse_qs(parsed.query)
-            
             is_tcp = params.get('type', [''])[0].lower() == 'tcp'
             is_reality = params.get('security', [''])[0].lower() == 'reality'
             
@@ -41,31 +40,21 @@ def parse_vless_links(raw_data):
                 continue
 
             name = unquote(parsed.fragment).lower()
-            has_location = any(k in name for k in target_keywords)
-            
-            if not has_location:
-                name_words = name.replace('-', ' ').replace('[', ' ').replace(']', ' ').replace('_', ' ').split()
-                if any(iso in name_words for iso in strict_iso):
-                    has_location = True
-
-            if has_location:
+            if any(k in name for k in target_keywords):
                 filtered_links.append(line)
         except:
             continue
     return filtered_links
 
 def get_data_with_retry(url, retries=3):
-    """Скачивает данные с повторными попытками при ошибках сети"""
     for i in range(retries):
         try:
-            # Увеличили таймаут до 30 секунд и добавили Headers
             response = requests.get(url, headers=HEADERS, timeout=30)
             response.raise_for_status()
             return response.text
         except Exception as e:
-            print(f"Попытка {i+1} не удалась: {e}")
             if i < retries - 1:
-                time.sleep(5) # Ждем 5 секунд перед следующей попыткой
+                time.sleep(5)
             else:
                 raise
 
@@ -74,36 +63,38 @@ def update_github():
         raw_data = get_data_with_retry(SOURCE_URL)
         links = parse_vless_links(raw_data)
         
-        content = "\n".join(links) if links else ""
+        if not links:
+            print("Конфиги не найдены.")
+            return
+
+        # Формируем текст и кодируем его в Base64 для лучшей совместимости
+        content_raw = "\n".join(links)
+        content_b64 = base64.b64encode(content_raw.encode('utf-8')).decode('utf-8')
 
         g = Github(TOKEN)
         repo = g.get_repo(REPO_NAME)
         
         try:
             contents = repo.get_contents(FILE_PATH)
-            current_content = contents.decoded_content.decode('utf-8')
-            if current_content == content:
-                print("Изменений нет. Пропускаем.")
-                return
-
+            # Обновляем
             repo.update_file(
                 path=FILE_PATH,
-                message="Auto-update: refined filtering",
-                content=content,
+                message="Update subscription (Base64)",
+                content=content_b64,
                 sha=contents.sha
             )
-            print(f"Успех! Найдено конфигов: {len(links)}")
+            print(f"Обновлено. Конфигов внутри: {len(links)}")
         except:
+            # Создаем
             repo.create_file(
                 path=FILE_PATH,
-                message="Initial VLESS configs",
-                content=content
+                message="Initial subscription",
+                content=content_b64
             )
-            print("Файл создан.")
+            print("Файл config создан.")
+            
     except Exception as e:
-        print(f"Критическая ошибка: {e}")
-        # Не вызываем sys.exit(1), чтобы Actions не помечался как упавший, 
-        # если сайт просто временно лежит.
-        
+        print(f"Ошибка: {e}")
+
 if __name__ == "__main__":
     update_github()
