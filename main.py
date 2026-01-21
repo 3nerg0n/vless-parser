@@ -29,7 +29,7 @@ def parse_vless_links(raw_data):
             is_tcp = params.get('type', [''])[0].lower() == 'tcp'
             is_reality = params.get('security', [''])[0].lower() == 'reality'
             name = unquote(parsed.fragment).lower()
-            has_location = any(x in name for x in ["germany", "netherlands", "de", "nl", "🇩🇪", "🇳🇱"])
+            has_location = any(x in name for x in ["germany", "netherlands"])
 
             if is_tcp and is_reality and has_location:
                 filtered_links.append(line)
