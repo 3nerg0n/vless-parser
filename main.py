@@ -1,6 +1,7 @@
 import os
 import requests
 import base64
+import time
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
 
@@ -10,19 +11,20 @@ FILE_PATH = "configs.txt"
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
+# Заголовки, чтобы сайт думал, что мы — браузер
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
 def parse_vless_links(raw_data):
     try:
-        # Пытаемся декодировать base64, если это подписка
         decoded_data = base64.b64decode(raw_data.strip()).decode('utf-8')
     except:
         decoded_data = raw_data
 
     lines = decoded_data.splitlines()
     filtered_links = []
-
-    # Список ключевых слов (более строгий)
-    target_keywords = ["germany", "netherlands"]
-    # Список сокращений, которые ищем только как отдельные слова или в скобках
+    target_keywords = ["germany", "netherlands", "nederland"]
     strict_iso = ["de", "nl"]
 
     for line in lines:
@@ -33,22 +35,16 @@ def parse_vless_links(raw_data):
             parsed = urlparse(line)
             params = parse_qs(parsed.query)
             
-            # 1. Проверка протоколов
             is_tcp = params.get('type', [''])[0].lower() == 'tcp'
             is_reality = params.get('security', [''])[0].lower() == 'reality'
             
             if not (is_tcp and is_reality):
                 continue
 
-            # 2. Проверка названия (локации) в фрагменте (#...)
             name = unquote(parsed.fragment).lower()
-            
-            # Проверяем наличие флагов или полных названий
             has_location = any(k in name for k in target_keywords)
             
-            # Если не нашли, проверяем ISO-коды (чтобы de не нашлось в слове index)
             if not has_location:
-                # Ищем " de " или "[de]" или "de-" и т.д.
                 name_words = name.replace('-', ' ').replace('[', ' ').replace(']', ' ').replace('_', ' ').split()
                 if any(iso in name_words for iso in strict_iso):
                     has_location = True
@@ -57,42 +53,58 @@ def parse_vless_links(raw_data):
                 filtered_links.append(line)
         except:
             continue
-            
     return filtered_links
 
+def get_data_with_retry(url, retries=3):
+    """Скачивает данные с повторными попытками при ошибках сети"""
+    for i in range(retries):
+        try:
+            # Увеличили таймаут до 30 секунд и добавили Headers
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except Exception as e:
+            print(f"Попытка {i+1} не удалась: {e}")
+            if i < retries - 1:
+                time.sleep(5) # Ждем 5 секунд перед следующей попыткой
+            else:
+                raise
+
 def update_github():
-    response = requests.get(SOURCE_URL, timeout=10)
-    response.raise_for_status()
-    links = parse_vless_links(response.text)
-    
-    # Если ничего не нашли, запишем пустую строку или оповещение (чтобы файл не был старым)
-    content = "\n".join(links) if links else ""
-
-    g = Github(TOKEN)
-    repo = g.get_repo(REPO_NAME)
-    
     try:
-        contents = repo.get_contents(FILE_PATH)
-        # Если содержимое не изменилось, не создаем лишних коммитов
-        current_content = contents.decoded_content.decode('utf-8')
-        if current_content == content:
-            print("Изменений нет. Пропускаем обновление.")
-            return
+        raw_data = get_data_with_retry(SOURCE_URL)
+        links = parse_vless_links(raw_data)
+        
+        content = "\n".join(links) if links else ""
 
-        repo.update_file(
-            path=FILE_PATH,
-            message="Auto-update: refined filtering",
-            content=content,
-            sha=contents.sha
-        )
-        print(f"Файл обновлен! Найдено конфигов: {len(links)}")
+        g = Github(TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        
+        try:
+            contents = repo.get_contents(FILE_PATH)
+            current_content = contents.decoded_content.decode('utf-8')
+            if current_content == content:
+                print("Изменений нет. Пропускаем.")
+                return
+
+            repo.update_file(
+                path=FILE_PATH,
+                message="Auto-update: refined filtering",
+                content=content,
+                sha=contents.sha
+            )
+            print(f"Успех! Найдено конфигов: {len(links)}")
+        except:
+            repo.create_file(
+                path=FILE_PATH,
+                message="Initial VLESS configs",
+                content=content
+            )
+            print("Файл создан.")
     except Exception as e:
-        repo.create_file(
-            path=FILE_PATH,
-            message="Initial VLESS configs",
-            content=content
-        )
-        print("Файл создан.")
-
+        print(f"Критическая ошибка: {e}")
+        # Не вызываем sys.exit(1), чтобы Actions не помечался как упавший, 
+        # если сайт просто временно лежит.
+        
 if __name__ == "__main__":
     update_github()
