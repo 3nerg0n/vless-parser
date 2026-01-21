@@ -25,7 +25,6 @@ def parse_vless_links(raw_data):
     lines = decoded_data.splitlines()
     filtered_links = []
     target_keywords = ["germany", "netherlands", "nederland"]
-    strict_iso = ["de", "nl"]
 
     for line in lines:
         line = line.strip()
