@@ -30,10 +30,14 @@ def create_xray_config(vless_link):
         address = host_port[0]
         port = int(host_port[1])
 
-        # Формируем конфиг с учетом Flow и Fingerprint
         config = {
-            "log": {"loglevel": "none"},
-            "inbounds": [{"port": 10808, "protocol": "socks", "settings": {"udp": True}}],
+            "log": {"loglevel": "warning"}, # Включили логи для отладки
+            "inbounds": [{
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"udp": True},
+                "sniffing": {"enabled": True, "destOverride": ["http", "tls"]}
+            }],
             "outbounds": [{
                 "protocol": "vless",
                 "settings": {
@@ -42,7 +46,7 @@ def create_xray_config(vless_link):
                         "users": [{
                             "id": uuid, 
                             "encryption": "none",
-                            "flow": params.get('flow', '') # Добавили FLOW (важно для Vision)
+                            "flow": params.get('flow', '')
                         }]
                     }]
                 },
@@ -50,12 +54,11 @@ def create_xray_config(vless_link):
                     "network": params.get('type', 'tcp'),
                     "security": params.get('security', 'none'),
                     "realitySettings": {
-                        "show": False,
-                        "fingerprint": params.get('fp', 'chrome'), # Добавили Fingerprint
+                        "fingerprint": params.get('fp', 'chrome'),
                         "serverName": params.get('sni', ''),
                         "publicKey": params.get('pbk', ''),
                         "shortId": params.get('sid', ''),
-                        "spiderX": params.get('spx', '')
+                        "spiderX": params.get('spx', '/')
                     }
                 }
             }]
@@ -64,7 +67,7 @@ def create_xray_config(vless_link):
             json.dump(config, f)
         return True
     except Exception as e:
-        print(f"❌ Ошибка парсинга ссылки: {e}")
+        print(f"❌ Ошибка парсинга: {e}")
         return False
 
 def test_connectivity(vless_link):
@@ -72,28 +75,43 @@ def test_connectivity(vless_link):
     if not create_xray_config(vless_link):
         return results
 
-    # Запускаем Xray
-    process = subprocess.Popen(["./xray", "-c", "test_config.json"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(5) # Увеличили ожидание до 5 секунд для стабильности
+    # Запускаем Xray и ловим его ошибки
+    log_file = open("xray_error.log", "w")
+    process = subprocess.Popen(
+        ["./xray", "-c", "test_config.json"], 
+        stdout=log_file, 
+        stderr=log_file
+    )
+    
+    time.sleep(5) # Ждем инициализации
 
     proxies = {"http": "socks5h://127.0.0.1:10808", "https": "socks5h://127.0.0.1:10808"}
     
-    # Тест 1: TikTok
     try:
-        r = requests.get("https://www.tiktok.com", proxies=proxies, timeout=15)
-        if r.status_code == 200: results["tiktok"] = True
-    except Exception as e:
-        pass # Просто не доступен
+        # Сначала проверим просто доступ к сети (Cloudflare)
+        requests.get("https://1.1.1.1", proxies=proxies, timeout=10)
+        
+        # Если сеть есть, проверяем сервисы
+        try:
+            r_tk = requests.get("https://www.tiktok.com", proxies=proxies, timeout=10)
+            if r_tk.status_code == 200: results["tiktok"] = True
+        except: pass
 
-    # Тест 2: Google AI
-    try:
-        r = requests.get("https://aistudio.google.com", proxies=proxies, timeout=15)
-        if r.status_code == 200: results["google_ai"] = True
+        try:
+            r_ai = requests.get("https://aistudio.google.com", proxies=proxies, timeout=10)
+            if r_ai.status_code == 200: results["google_ai"] = True
+        except: pass
     except Exception as e:
-        pass
+        # Если даже 1.1.1.1 не открылся, выведем лог Xray
+        print(f"   ⚠️ Ошибка прокси: {e}")
+        process.terminate()
+        log_file.close()
+        with open("xray_error.log", "r") as f:
+            print(f"   📝 Лог Xray: {f.read().strip()}")
+        return results
 
     process.terminate()
-    process.wait()
+    log_file.close()
     return results
 
 def parse_vless_links(raw_data):
@@ -104,13 +122,12 @@ def parse_vless_links(raw_data):
     
     lines = decoded_data.splitlines()
     filtered = []
-    keywords = ["germany", "netherlands"]
+    keywords = ["germany", "netherlands", "nederland", "🇩🇪", "🇳🇱"]
     
     for line in lines:
         line = line.strip()
         if line.startswith("vless://"):
-            # Проверяем, что это именно REALITY и TCP (как ты просил в начале)
-            if "security=reality" in line and "type=tcp" in line:
+            if "security=reality" in line:
                 name = unquote(urlparse(line).fragment).lower()
                 if any(k in name for k in keywords):
                     filtered.append(line)
@@ -131,28 +148,22 @@ def update_github():
     print(f"🔍 Начинаем проверку {len(unique_links)} серверов...")
     
     for link in unique_links:
-        name = unquote(urlparse(link).fragment)
-        print(f"🧪 Тестируем: {name[:50]}...") # Обрезаем длинные имена в логах
+        name = unquote(urlparse(line).fragment if '#' in line else "NoName")
+        print(f"🧪 Тестируем: {name[:40]}...")
         res = test_connectivity(link)
         
         if res["tiktok"] or res["google_ai"]:
             working_links.append(link)
-            status = []
-            if res["tiktok"]: 
-                tiktok_links.append(link)
-                status.append("TikTok")
-            if res["google_ai"]: 
-                google_ai_links.append(link)
-                status.append("GoogleAI")
-            print(f"   ✅ РАБОТАЕТ: {', '.join(status)}")
+            if res["tiktok"]: tiktok_links.append(link)
+            if res["google_ai"]: google_ai_links.append(link)
+            print(f"   ✅ OK!")
         else:
-            print(f"   ❌ Не прошел тесты")
+            print(f"   ❌ Не прошел")
 
     if not working_links:
-        print("⚠️ Ни один сервер не прошел проверку. Файлы не обновлены.")
+        print("⚠️ Ни один сервер не прошел проверку.")
         return
 
-    # Сохранение на GitHub
     g = Github(TOKEN)
     repo = g.get_repo(REPO_NAME)
     data = {"config": "\n".join(working_links), "config_tiktok": "\n".join(tiktok_links), "config_google_ai": "\n".join(google_ai_links)}
