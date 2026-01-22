@@ -2,14 +2,12 @@ name: Update VLESS Configs
 
 on:
   schedule:
-    - cron: '0 * * * *' # Запуск каждый час
-  workflow_dispatch: # Кнопка для ручного запуска
+    - cron: '0 * * * *' # Раз в час
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30 # Даем скрипту до 30 минут на проверку всех серверов
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,13 +18,7 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: |
-          pip install "requests[socks]" PyGithub
-
-      - name: Install system utilities
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl unzip
+        run: pip install requests PyGithub
 
       - name: Run script
         env:
