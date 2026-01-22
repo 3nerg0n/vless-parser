@@ -21,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests PyGithub
+          pip install "requests[socks]" PyGithub
 
       - name: Install system utilities
         run: |
