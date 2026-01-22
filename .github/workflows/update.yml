@@ -3,7 +3,7 @@ name: Update VLESS Configs
 on:
   schedule:
     # Запуск каждые 3 часа (минуты часы день месяц день_недели)
-    - cron: '0 */3 * * *'
+    - cron: '0 * * * *'
   workflow_dispatch: # Позволяет запускать вручную кнопкой
 
 jobs:
