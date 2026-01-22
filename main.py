@@ -4,7 +4,6 @@ import base64
 import time
 import json
 import subprocess
-import socket
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
 
@@ -12,19 +11,19 @@ from github import Github
 SOURCE_URLS = ["https://etoneya.a9fm.site/1", "https://etoneya.a9fm.site/2"]
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
-
-# Ссылки для проверки доступа
-TEST_TIKTOK = "https://www.tiktok.com"
-TEST_GOOGLE_AI = "https://aistudio.google.com"
+FILE_PATH_ALL = "config"
+FILE_PATH_TIKTOK = "config_tiktok"
+FILE_PATH_AI = "config_google_ai"
 
 def install_xray():
-    """Скачивает ядро Xray для тестов"""
-    print("Установка Xray core...")
-    url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
-    os.system(f"curl -L -o xray.zip {url} && unzip -o xray.zip xray && chmod +x xray")
+    if not os.path.exists("./xray"):
+        print("📥 Установка Xray core...")
+        url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
+        os.system(f"curl -L -o xray.zip {url} && unzip -o xray.zip xray && chmod +x xray")
+    else:
+        print("✅ Xray уже установлен")
 
 def create_xray_config(vless_link):
-    """Создает временный конфиг для Xray из VLESS ссылки"""
     try:
         parsed = urlparse(vless_link)
         params = parse_qs(parsed.query)
@@ -35,6 +34,7 @@ def create_xray_config(vless_link):
         port = int(host_port[1])
 
         config = {
+            "log": {"loglevel": "none"},
             "inbounds": [{"port": 10808, "protocol": "socks", "settings": {"udp": True}}],
             "outbounds": [{
                 "protocol": "vless",
@@ -59,36 +59,42 @@ def create_xray_config(vless_link):
         with open('test_config.json', 'w') as f:
             json.dump(config, f)
         return True
-    except:
+    except Exception as e:
+        print(f"❌ Ошибка создания конфига Xray: {e}")
         return False
 
 def test_connectivity(vless_link):
-    """Проверяет доступ к сервисам через VLESS"""
-    results = {"tiktok": False, "google_ai": False, "ping": 999}
-    
+    results = {"tiktok": False, "google_ai": False}
     if not create_xray_config(vless_link):
         return results
 
-    # Запускаем Xray в фоне
+    # Запускаем Xray
     process = subprocess.Popen(["./xray", "-c", "test_config.json"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2) # Ждем инициализации
+    time.sleep(3) # Даем время на запуск и хендшейк
 
-    proxies = {"http": "socks5h://127.0.0.1:10808", "https": "socks5h://127.0.0.1:10808"}
+    proxies = {
+        "http": "socks5h://127.0.0.1:10808",
+        "https": "socks5h://127.0.0.1:10808"
+    }
     
     try:
-        # Тест TikTok
-        r_tk = requests.get(TEST_TIKTOK, proxies=proxies, timeout=10)
-        if r_tk.status_code == 200: results["tiktok"] = True
-        
-        # Тест Google AI
-        r_ai = requests.get(TEST_GOOGLE_AI, proxies=proxies, timeout=10)
-        if r_ai.status_code == 200: results["google_ai"] = True
-        
-        print(f"Результаты: TikTok={results['tiktok']}, GoogleAI={results['google_ai']}")
-    except:
-        pass
+        # Проверка TikTok
+        r_tk = requests.get("https://www.tiktok.com", proxies=proxies, timeout=15)
+        if r_tk.status_code == 200:
+            results["tiktok"] = True
+    except Exception as e:
+        print(f"   - TikTok недоступен")
+
+    try:
+        # Проверка Google AI (Gemini)
+        r_ai = requests.get("https://aistudio.google.com", proxies=proxies, timeout=15)
+        if r_ai.status_code == 200:
+            results["google_ai"] = True
+    except Exception as e:
+        print(f"   - Google AI недоступен")
 
     process.terminate()
+    process.wait()
     return results
 
 def parse_vless_links(raw_data):
@@ -114,9 +120,13 @@ def update_github():
     all_links = []
     for url in SOURCE_URLS:
         try:
+            print(f"🌐 Загрузка из {url}...")
             r = requests.get(url, timeout=20)
-            all_links.extend(parse_vless_links(r.text))
-        except: continue
+            links = parse_vless_links(r.text)
+            all_links.extend(links)
+            print(f"✅ Найдено {len(links)} потенциальных серверов")
+        except Exception as e:
+            print(f"❌ Ошибка загрузки {url}: {e}")
     
     unique_links = list(dict.fromkeys(all_links))
     
@@ -124,33 +134,47 @@ def update_github():
     google_ai_links = []
     working_links = []
 
-    print(f"Начинаем проверку {len(unique_links)} серверов...")
+    print(f"🔍 Начинаем проверку {len(unique_links)} серверов...")
     for link in unique_links:
-        print(f"Тестируем: {unquote(urlparse(link).fragment)}")
+        name = unquote(urlparse(link).fragment)
+        print(f"🧪 Тестируем: {name}")
         res = test_connectivity(link)
         
-        # Если хоть один тест прошел, считаем сервер живым
+        # Если сервер прошел хотя бы один тест, добавляем в общий список
         if res["tiktok"] or res["google_ai"]:
             working_links.append(link)
-            if res["tiktok"]: tiktok_links.append(link)
-            if res["google_ai"]: google_ai_links.append(link)
+            if res["tiktok"]: 
+                print(f"   [+] TikTok OK")
+                tiktok_links.append(link)
+            if res["google_ai"]: 
+                print(f"   [+] Google AI OK")
+                google_ai_links.append(link)
+        else:
+            print(f"   [-] Сервер не прошел тесты")
 
-    # Сохранение файлов
-    files_to_update = {
-        "config": "\n".join(working_links),
-        "config_tiktok": "\n".join(tiktok_links),
-        "config_google_ai": "\n".join(google_ai_links)
-    }
+    # Если вообще ничего не работает, не будем затирать файлы, а просто выйдем
+    if not working_links:
+        print("⚠️ ВНИМАНИЕ: Ни один сервер не прошел проверку. Файлы не будут обновлены.")
+        return
 
+    # Сохранение
     g = Github(TOKEN)
     repo = g.get_repo(REPO_NAME)
     
-    for path, content in files_to_update.items():
+    data_to_save = {
+        FILE_PATH_ALL: "\n".join(working_links),
+        FILE_PATH_TIKTOK: "\n".join(tiktok_links),
+        FILE_PATH_AI: "\n".join(google_ai_links)
+    }
+
+    for path, content in data_to_save.items():
         try:
             curr = repo.get_contents(path)
             repo.update_file(path, f"Update {path}", content, curr.sha)
+            print(f"💾 Файл {path} обновлен")
         except:
             repo.create_file(path, f"Create {path}", content)
+            print(f"🆕 Файл {path} создан")
 
 if __name__ == "__main__":
     update_github()
