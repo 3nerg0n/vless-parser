@@ -1,52 +1,49 @@
 import os
 import requests
+import base64
 import time
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
 
-# --- КОНФИГУРАЦИЯ ---
-SOURCE_URL = "https://etoneya.a9fm.site/1"
-FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения
+# --- НАСТРОЙКИ ---
+SOURCE_URLS = [
+    "https://etoneya.a9fm.site/1",
+    "https://etoneya.a9fm.site/2"
+]
+FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения 
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
-# Заголовки для имитации браузера
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def parse_vless_links(raw_data):
-    # Работаем напрямую с текстом без base64
-    lines = raw_data.splitlines()
+    try:
+        decoded_data = base64.b64decode(raw_data.strip()).decode('utf-8')
+    except:
+        decoded_data = raw_data
+
+    lines = decoded_data.splitlines()
     filtered_links = []
-    target_keywords = ["germany", "netherlands"]
+    target_keywords = ["germany", "netherlands", "nederland", "🇩🇪", "🇳🇱"]
 
     for line in lines:
         line = line.strip()
-        # Если строка — это base64 (иногда весь файл зашифрован), попробуем декодировать
-        if not line.startswith("vless://") and len(line) > 50:
-            try:
-                import base64
-                decoded = base64.b64decode(line).decode('utf-8')
-                return parse_vless_links(decoded) # Рекурсивно обрабатываем декодированный текст
-            except:
-                continue
-
         if not line.startswith("vless://"):
             continue
-
         try:
             parsed = urlparse(line)
             params = parse_qs(parsed.query)
             
-            # Проверка параметров
+            # Фильтр: только TCP и REALITY
             is_tcp = params.get('type', [''])[0].lower() == 'tcp'
             is_reality = params.get('security', [''])[0].lower() == 'reality'
             
             if not (is_tcp and is_reality):
                 continue
 
-            # Проверка названия
+            # Фильтр по названию
             name = unquote(parsed.fragment).lower()
             if any(k in name for k in target_keywords):
                 filtered_links.append(line)
@@ -54,60 +51,34 @@ def parse_vless_links(raw_data):
             continue
     return filtered_links
 
-def get_data_with_retry(url, retries=3):
-    for i in range(retries):
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            print(f"Попытка {i+1} не удалась: {e}")
-            if i < retries - 1:
-                time.sleep(5)
-            else:
-                raise
-
 def update_github():
-    try:
-        raw_data = get_data_with_retry(SOURCE_URL)
-        links = parse_vless_links(raw_data)
-        
-        if not links:
-            print("Подходящих конфигов не найдено.")
-            # Чтобы очистить файл, если конфиги пропали:
-            content = "" 
-        else:
-            content = "\n".join(links)
-
-        g = Github(TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        
+    all_links = []
+    for url in SOURCE_URLS:
         try:
-            # Обновление существующего файла
-            contents = repo.get_contents(FILE_PATH)
-            # Проверяем, изменилось ли что-то, чтобы не плодить коммиты
-            if contents.decoded_content.decode('utf-8') == content:
-                print("Контент не изменился. Пропускаем.")
-                return
-
-            repo.update_file(
-                path=FILE_PATH,
-                message="Update config (Plain Text)",
-                content=content,
-                sha=contents.sha
-            )
-            print(f"Файл обновлен. Найдено ссылок: {len(links)}")
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            if response.status_code == 200:
+                links = parse_vless_links(response.text)
+                all_links.extend(links)
         except:
-            # Создание файла, если его нет
-            repo.create_file(
-                path=FILE_PATH,
-                message="Initial config creation",
-                content=content
-            )
-            print("Файл config создан.")
-            
-    except Exception as e:
-        print(f"Критическая ошибка: {e}")
+            continue
+
+    # Удаляем дубликаты
+    unique_links = list(dict.fromkeys(all_links))
+    content = "\n".join(unique_links)
+
+    g = Github(TOKEN)
+    repo = g.get_repo(REPO_NAME)
+    
+    try:
+        contents = repo.get_contents(FILE_PATH)
+        if contents.decoded_content.decode('utf-8') == content:
+            print("Изменений нет.")
+            return
+        repo.update_file(path=FILE_PATH, message="Fast update", content=content, sha=contents.sha)
+    except:
+        repo.create_file(path=FILE_PATH, message="Initial config", content=content)
+    
+    print(f"Готово! Собрано ссылок: {len(unique_links)}")
 
 if __name__ == "__main__":
     update_github()
