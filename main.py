@@ -31,7 +31,7 @@ def create_xray_config(vless_link):
         port = int(host_port[1])
 
         config = {
-            "log": {"loglevel": "warning"}, # Включили логи для отладки
+            "log": {"loglevel": "warning"},
             "inbounds": [{
                 "port": 10808,
                 "protocol": "socks",
@@ -75,7 +75,7 @@ def test_connectivity(vless_link):
     if not create_xray_config(vless_link):
         return results
 
-    # Запускаем Xray и ловим его ошибки
+    # Запускаем Xray
     log_file = open("xray_error.log", "w")
     process = subprocess.Popen(
         ["./xray", "-c", "test_config.json"], 
@@ -83,31 +83,36 @@ def test_connectivity(vless_link):
         stderr=log_file
     )
     
-    time.sleep(5) # Ждем инициализации
+    time.sleep(5) # Ждем запуска
 
     proxies = {"http": "socks5h://127.0.0.1:10808", "https": "socks5h://127.0.0.1:10808"}
     
     try:
-        # Сначала проверим просто доступ к сети (Cloudflare)
+        # Проверка базового интернета
         requests.get("https://1.1.1.1", proxies=proxies, timeout=10)
         
-        # Если сеть есть, проверяем сервисы
+        # Тест TikTok
         try:
             r_tk = requests.get("https://www.tiktok.com", proxies=proxies, timeout=10)
             if r_tk.status_code == 200: results["tiktok"] = True
         except: pass
 
+        # Тест Google AI
         try:
             r_ai = requests.get("https://aistudio.google.com", proxies=proxies, timeout=10)
             if r_ai.status_code == 200: results["google_ai"] = True
         except: pass
     except Exception as e:
-        # Если даже 1.1.1.1 не открылся, выведем лог Xray
-        print(f"   ⚠️ Ошибка прокси: {e}")
+        print(f"   ⚠️ Ошибка соединения: {e}")
+        # Если не работает, выведем лог Xray для диагностики
         process.terminate()
         log_file.close()
-        with open("xray_error.log", "r") as f:
-            print(f"   📝 Лог Xray: {f.read().strip()}")
+        try:
+            with open("xray_error.log", "r") as f:
+                log_content = f.read().strip()
+                if log_content:
+                    print(f"   📝 Xray Log: {log_content}")
+        except: pass
         return results
 
     process.terminate()
@@ -148,7 +153,8 @@ def update_github():
     print(f"🔍 Начинаем проверку {len(unique_links)} серверов...")
     
     for link in unique_links:
-        name = unquote(urlparse(line).fragment if '#' in line else "NoName")
+        # ИСПРАВЛЕНО: используем link вместо line
+        name = unquote(urlparse(link).fragment if '#' in link else "NoName")
         print(f"🧪 Тестируем: {name[:40]}...")
         res = test_connectivity(link)
         
@@ -161,12 +167,16 @@ def update_github():
             print(f"   ❌ Не прошел")
 
     if not working_links:
-        print("⚠️ Ни один сервер не прошел проверку.")
+        print("⚠️ Ни один сервер не прошел проверку. Файлы не обновлены.")
         return
 
     g = Github(TOKEN)
     repo = g.get_repo(REPO_NAME)
-    data = {"config": "\n".join(working_links), "config_tiktok": "\n".join(tiktok_links), "config_google_ai": "\n".join(google_ai_links)}
+    data = {
+        "config": "\n".join(working_links), 
+        "config_tiktok": "\n".join(tiktok_links), 
+        "config_google_ai": "\n".join(google_ai_links)
+    }
 
     for path, content in data.items():
         try:
