@@ -1,189 +1,113 @@
 import os
 import requests
-import base64
 import time
-import json
-import subprocess
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
 
-# --- НАСТРОЙКИ ---
-SOURCE_URLS = ["https://etoneya.a9fm.site/1", "https://etoneya.a9fm.site/2"]
+# --- КОНФИГУРАЦИЯ ---
+SOURCE_URL = "https://etoneya.a9fm.site/1"
+FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
-def install_xray():
-    if not os.path.exists("./xray"):
-        print("📥 Установка Xray core...")
-        url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
-        os.system(f"curl -L -o xray.zip {url} && unzip -o xray.zip xray && chmod +x xray")
-    else:
-        print("✅ Xray уже установлен")
-
-def create_xray_config(vless_link):
-    try:
-        parsed = urlparse(vless_link)
-        params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        user_info = parsed.netloc.split('@')
-        uuid = user_info[0]
-        host_port = user_info[1].split(':')
-        address = host_port[0]
-        port = int(host_port[1])
-
-        config = {
-            "log": {"loglevel": "warning"},
-            "inbounds": [{
-                "port": 10808,
-                "protocol": "socks",
-                "settings": {"udp": True},
-                "sniffing": {"enabled": True, "destOverride": ["http", "tls"]}
-            }],
-            "outbounds": [{
-                "protocol": "vless",
-                "settings": {
-                    "vnext": [{
-                        "address": address, "port": port,
-                        "users": [{
-                            "id": uuid, 
-                            "encryption": "none",
-                            "flow": params.get('flow', '')
-                        }]
-                    }]
-                },
-                "streamSettings": {
-                    "network": params.get('type', 'tcp'),
-                    "security": params.get('security', 'none'),
-                    "realitySettings": {
-                        "fingerprint": params.get('fp', 'chrome'),
-                        "serverName": params.get('sni', ''),
-                        "publicKey": params.get('pbk', ''),
-                        "shortId": params.get('sid', ''),
-                        "spiderX": params.get('spx', '/')
-                    }
-                }
-            }]
-        }
-        with open('test_config.json', 'w') as f:
-            json.dump(config, f)
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка парсинга: {e}")
-        return False
-
-def test_connectivity(vless_link):
-    results = {"tiktok": False, "google_ai": False}
-    if not create_xray_config(vless_link):
-        return results
-
-    # Запускаем Xray
-    log_file = open("xray_error.log", "w")
-    process = subprocess.Popen(
-        ["./xray", "-c", "test_config.json"], 
-        stdout=log_file, 
-        stderr=log_file
-    )
-    
-    time.sleep(5) # Ждем запуска
-
-    proxies = {"http": "socks5h://127.0.0.1:10808", "https": "socks5h://127.0.0.1:10808"}
-    
-    try:
-        # Проверка базового интернета
-        requests.get("https://1.1.1.1", proxies=proxies, timeout=10)
-        
-        # Тест TikTok
-        try:
-            r_tk = requests.get("https://www.tiktok.com", proxies=proxies, timeout=10)
-            if r_tk.status_code == 200: results["tiktok"] = True
-        except: pass
-
-        # Тест Google AI
-        try:
-            r_ai = requests.get("https://aistudio.google.com", proxies=proxies, timeout=10)
-            if r_ai.status_code == 200: results["google_ai"] = True
-        except: pass
-    except Exception as e:
-        print(f"   ⚠️ Ошибка соединения: {e}")
-        # Если не работает, выведем лог Xray для диагностики
-        process.terminate()
-        log_file.close()
-        try:
-            with open("xray_error.log", "r") as f:
-                log_content = f.read().strip()
-                if log_content:
-                    print(f"   📝 Xray Log: {log_content}")
-        except: pass
-        return results
-
-    process.terminate()
-    log_file.close()
-    return results
+# Заголовки для имитации браузера
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
 
 def parse_vless_links(raw_data):
-    try:
-        decoded_data = base64.b64decode(raw_data.strip()).decode('utf-8')
-    except:
-        decoded_data = raw_data
-    
-    lines = decoded_data.splitlines()
-    filtered = []
-    keywords = ["germany", "netherlands"]
-    
+    # Работаем напрямую с текстом без base64
+    lines = raw_data.splitlines()
+    filtered_links = []
+    target_keywords = ["germany", "netherlands"]
+
     for line in lines:
         line = line.strip()
-        if line.startswith("vless://"):
-            if "security=reality" in line:
-                name = unquote(urlparse(line).fragment).lower()
-                if any(k in name for k in keywords):
-                    filtered.append(line)
-    return list(dict.fromkeys(filtered))
+        # Если строка — это base64 (иногда весь файл зашифрован), попробуем декодировать
+        if not line.startswith("vless://") and len(line) > 50:
+            try:
+                import base64
+                decoded = base64.b64decode(line).decode('utf-8')
+                return parse_vless_links(decoded) # Рекурсивно обрабатываем декодированный текст
+            except:
+                continue
+
+        if not line.startswith("vless://"):
+            continue
+
+        try:
+            parsed = urlparse(line)
+            params = parse_qs(parsed.query)
+            
+            # Проверка параметров
+            is_tcp = params.get('type', [''])[0].lower() == 'tcp'
+            is_reality = params.get('security', [''])[0].lower() == 'reality'
+            
+            if not (is_tcp and is_reality):
+                continue
+
+            # Проверка названия
+            name = unquote(parsed.fragment).lower()
+            if any(k in name for k in target_keywords):
+                filtered_links.append(line)
+        except:
+            continue
+    return filtered_links
+
+def get_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except Exception as e:
+            print(f"Попытка {i+1} не удалась: {e}")
+            if i < retries - 1:
+                time.sleep(5)
+            else:
+                raise
 
 def update_github():
-    install_xray()
-    all_links = []
-    for url in SOURCE_URLS:
-        try:
-            r = requests.get(url, timeout=20)
-            all_links.extend(parse_vless_links(r.text))
-        except: continue
-    
-    unique_links = list(dict.fromkeys(all_links))
-    tiktok_links, google_ai_links, working_links = [], [], []
-
-    print(f"🔍 Начинаем проверку {len(unique_links)} серверов...")
-    
-    for link in unique_links:
-        # ИСПРАВЛЕНО: используем link вместо line
-        name = unquote(urlparse(link).fragment if '#' in link else "NoName")
-        print(f"🧪 Тестируем: {name[:40]}...")
-        res = test_connectivity(link)
+    try:
+        raw_data = get_data_with_retry(SOURCE_URL)
+        links = parse_vless_links(raw_data)
         
-        if res["tiktok"] or res["google_ai"]:
-            working_links.append(link)
-            if res["tiktok"]: tiktok_links.append(link)
-            if res["google_ai"]: google_ai_links.append(link)
-            print(f"   ✅ OK!")
+        if not links:
+            print("Подходящих конфигов не найдено.")
+            # Чтобы очистить файл, если конфиги пропали:
+            content = "" 
         else:
-            print(f"   ❌ Не прошел")
+            content = "\n".join(links)
 
-    if not working_links:
-        print("⚠️ Ни один сервер не прошел проверку. Файлы не обновлены.")
-        return
-
-    g = Github(TOKEN)
-    repo = g.get_repo(REPO_NAME)
-    data = {
-        "config": "\n".join(working_links), 
-        "config_tiktok": "\n".join(tiktok_links), 
-        "config_google_ai": "\n".join(google_ai_links)
-    }
-
-    for path, content in data.items():
+        g = Github(TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        
         try:
-            curr = repo.get_contents(path)
-            repo.update_file(path, f"Update {path}", content, curr.sha)
+            # Обновление существующего файла
+            contents = repo.get_contents(FILE_PATH)
+            # Проверяем, изменилось ли что-то, чтобы не плодить коммиты
+            if contents.decoded_content.decode('utf-8') == content:
+                print("Контент не изменился. Пропускаем.")
+                return
+
+            repo.update_file(
+                path=FILE_PATH,
+                message="Update config (Plain Text)",
+                content=content,
+                sha=contents.sha
+            )
+            print(f"Файл обновлен. Найдено ссылок: {len(links)}")
         except:
-            repo.create_file(path, f"Create {path}", content)
+            # Создание файла, если его нет
+            repo.create_file(
+                path=FILE_PATH,
+                message="Initial config creation",
+                content=content
+            )
+            print("Файл config создан.")
+            
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
 
 if __name__ == "__main__":
     update_github()
