@@ -64,7 +64,7 @@ def check_server(vless_link, index):
 def update_github():
     install_xray()
     all_raw_links = []
-    reality_count = 0
+    reality_links = []
     
     for url in SOURCE_URLS:
         try:
@@ -76,35 +76,41 @@ def update_github():
             
             found = re.findall(r'(vless://[^\s]+)', text)
             print(f"🔎 Источник {url}: найдено {len(found)} ссылок")
-            
             for link in found:
-                # Считаем сколько вообще Reality ссылок
                 if "security=reality" in link:
-                    reality_count += 1
-                    name = unquote(urlparse(link).fragment).lower()
-                    
-                    # Более гибкий поиск стран
-                    # Ищем полные названия или коды DE/NL как отдельные слова
-                    keywords = ["germany", "netherlands", "nederland", "🇩🇪", "🇳🇱"]
-                    iso_codes = ["de", "nl"]
-                    
-                    has_loc = any(k in name for k in keywords)
-                    if not has_loc:
-                        # Разбиваем имя на слова и ищем точное совпадение de или nl
-                        words = re.split(r'[^a-z]', name)
-                        if any(code in words for code in iso_codes):
-                            has_loc = True
-                    
-                    if has_loc:
-                        all_raw_links.append(link)
+                    reality_links.append(link)
         except: continue
 
+    print(f"📊 Всего Reality-ссылок: {len(reality_links)}")
+    
+    # Список ключевых слов для поиска
+    keywords = ["germany", "netherlands", "nederland", "🇩🇪", "🇳🇱"]
+    
+    # Отладочный вывод первых 3 имен, чтобы понять формат
+    if reality_links:
+        print("📝 Примеры имен в Reality ссылках:")
+        for l in reality_links[:3]:
+            print(f"   - {unquote(urlparse(l).fragment)}")
+
+    for link in reality_links:
+        # Ищем во всей ссылке (и в названии, и в адресе)
+        full_link_text = unquote(link).lower()
+        
+        has_loc = any(k in full_link_text for k in keywords)
+        
+        # Если не нашли по словам, ищем коды DE и NL как отдельные слова
+        if not has_loc:
+            if re.search(r'\b(de|nl)\b', full_link_text):
+                has_loc = True
+        
+        if has_loc:
+            all_raw_links.append(link)
+
     unique_links = list(dict.fromkeys(all_raw_links))
-    print(f"📊 Всего Reality-ссылок во всех локациях: {reality_count}")
     print(f"🚀 Итого к проверке (DE/NL + Reality): {len(unique_links)}")
 
     if not unique_links:
-        print("⚠️ Подходящих ссылок не найдено. Возможно, сейчас нет Reality-серверов для DE/NL.")
+        print("⚠️ Подходящих ссылок не найдено. Проверь лог выше (Примеры имен).")
         return
 
     google_ai_list, tiktok_list = [], []
