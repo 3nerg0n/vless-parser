@@ -45,10 +45,8 @@ def check_server(vless_link, index):
         with open(config_path, 'w') as f: json.dump(config, f)
         proc = subprocess.Popen(["./xray", "-c", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
-
         proxies = {"http": f"socks5h://127.0.0.1:{port}", "https": f"socks5h://127.0.0.1:{port}"}
         res = {"link": vless_link, "tiktok": False, "google_ai": False}
-
         try:
             r = requests.get("https://cp.cloudflare.com/generate_204", proxies=proxies, timeout=5)
             if r.status_code == 204:
@@ -58,7 +56,6 @@ def check_server(vless_link, index):
                     if r_ai.status_code == 200: res["google_ai"] = True
                 except: pass
         except: pass
-
         proc.terminate()
         if os.path.exists(config_path): os.remove(config_path)
         return res
@@ -67,42 +64,50 @@ def check_server(vless_link, index):
 def update_github():
     install_xray()
     all_raw_links = []
+    reality_count = 0
     
     for url in SOURCE_URLS:
         try:
-            print(f"📥 Загрузка: {url}")
             r = requests.get(url, timeout=15)
             text = r.text
-            
-            # Пытаемся декодировать Base64, если это не обычный список ссылок
             if "vless://" not in text:
-                try:
-                    text = base64.b64decode(text.strip()).decode('utf-8')
+                try: text = base64.b64decode(text.strip()).decode('utf-8')
                 except: pass
             
-            # Ищем все vless ссылки через регулярное выражение
             found = re.findall(r'(vless://[^\s]+)', text)
-            print(f"🔎 Найдено ссылок в источнике: {len(found)}")
+            print(f"🔎 Источник {url}: найдено {len(found)} ссылок")
             
             for link in found:
-                # Фильтруем по твоим критериям: Reality + (Germany или Netherlands)
+                # Считаем сколько вообще Reality ссылок
                 if "security=reality" in link:
+                    reality_count += 1
                     name = unquote(urlparse(link).fragment).lower()
-                    if any(k in name for k in ["germany", "netherlands"]):
+                    
+                    # Более гибкий поиск стран
+                    # Ищем полные названия или коды DE/NL как отдельные слова
+                    keywords = ["germany", "netherlands", "nederland", "🇩🇪", "🇳🇱"]
+                    iso_codes = ["de", "nl"]
+                    
+                    has_loc = any(k in name for k in keywords)
+                    if not has_loc:
+                        # Разбиваем имя на слова и ищем точное совпадение de или nl
+                        words = re.split(r'[^a-z]', name)
+                        if any(code in words for code in iso_codes):
+                            has_loc = True
+                    
+                    if has_loc:
                         all_raw_links.append(link)
-        except Exception as e:
-            print(f"❌ Ошибка при обработке {url}: {e}")
+        except: continue
 
     unique_links = list(dict.fromkeys(all_raw_links))
+    print(f"📊 Всего Reality-ссылок во всех локациях: {reality_count}")
     print(f"🚀 Итого к проверке (DE/NL + Reality): {len(unique_links)}")
 
     if not unique_links:
-        print("⚠️ Ссылок не найдено. Проверь источники или фильтры.")
+        print("⚠️ Подходящих ссылок не найдено. Возможно, сейчас нет Reality-серверов для DE/NL.")
         return
 
-    google_ai_list = []
-    tiktok_list = []
-
+    google_ai_list, tiktok_list = [], []
     with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
         results = list(executor.map(check_server, unique_links, range(len(unique_links))))
 
@@ -113,7 +118,6 @@ def update_github():
 
     g = Github(TOKEN)
     repo = g.get_repo(REPO_NAME)
-    
     for path, links in [("config_google_ai", google_ai_list), ("config_tiktok", tiktok_list)]:
         content = "\n".join(links)
         try:
@@ -121,7 +125,6 @@ def update_github():
             repo.update_file(path, f"Update {path}", content, curr.sha)
         except:
             repo.create_file(path, f"Create {path}", content)
-    
     print(f"✅ Готово! Google AI: {len(google_ai_list)}, TikTok: {len(tiktok_list)}")
 
 if __name__ == "__main__":
