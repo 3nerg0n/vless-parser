@@ -1,26 +1,22 @@
 name: Update VLESS Configs
-
 on:
   schedule:
-    - cron: '0 * * * *' # Раз в час
+    - cron: '0 * * * *'
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Install dependencies
-        run: pip install requests PyGithub
-
+        run: pip install "requests[socks]" PyGithub
       - name: Run script
         env:
           MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          PYTHONUNBUFFERED: 1
         run: python main.py
