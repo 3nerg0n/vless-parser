@@ -19,7 +19,7 @@ def parse_vless_links(raw_data):
     # Работаем напрямую с текстом без base64
     lines = raw_data.splitlines()
     filtered_links = []
-    target_keywords = ["germany", "netherlands", "Hungary", "France", "Kazakhstan", "Poland", "Latvia", "Switzerland", "Estonia", "Sweden"]
+    target_keywords = ["germany", "netherlands", "hungary", "france", "kazakhstan", "poland", "latvia", "switzerland", "estonia", "sweden"]
 
     for line in lines:
         line = line.strip()
