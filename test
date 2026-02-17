@@ -1,7 +1,7 @@
-#profile-update-interval: 6
-#hide-settings: 1
-#profile-title: DocVPN
-#subscription-userinfo: upload=10; download=50; total=1000; expire=1771420186
+#profile-update-interval: 3 автообновление
+#hide-settings: 1 скрыть настройки серверов
+#profile-title: Название подписки
+
 #announce: Описание
 #support-url: тг ссылка
 #profile-web-page-url: кнопка информации !
