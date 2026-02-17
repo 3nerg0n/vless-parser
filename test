@@ -1,10 +1,10 @@
 #profile-update-interval: 6
 #hide-settings: 1
 #profile-title: DocVPN
-#subscription-userinfo: upload=0; download=0; total=0; expire=1771420186
-#announce: Приоритет сверху вниз 🙏 🙏 🙏
-#support-url: https://t.me/sup_docvpn_bot
-#profile-web-page-url: https://t.me/docvpn
+#subscription-userinfo: upload=10; download=50; total=1000; expire=1771420186
+#announce: Описание
+#support-url: тг ссылка
+#profile-web-page-url: кнопка информации !
 
 vless://f0b15f64-db59-438c-b1b6-f1b83db52240@217.154.194.55:443?type=tcp&security=reality&encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=ckRcueERkPqqjZABwxqni_J_Nbb70Q6k5fEEUAjoImw&sni=azure.com#0004 | 🇩🇪 Germany | VLESS | 📺 YT | TG: @YoutubeUnBlockRu
 vless://5a7fd686-d60f-440a-9495-273b6a6f8755@144.31.100.120:443?type=tcp&security=reality&encryption=none&fp=chrome&pbk=ihtXyG0UidSbXjvCJXUhABwZGCCB62DUsVBFn_qVd3g&sid=768c60&sni=google.com#0015 | 🇳🇱 Netherlands | VLESS | 📺 YT | TG: @YoutubeUnBlockRu
