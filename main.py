@@ -9,11 +9,14 @@ from github import Github
 # Теперь здесь список ссылок
 SOURCE_URLS = [
     "https://etoneya.a9fm.site/1",
-    "https://bp.wl.free.nf/confs/selected.txt",
-	"https://bp.wl.free.nf/confs/wl.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
+	"https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+	"https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt,
 	"https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
 	"https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-	"https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt"
+	"https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+	"https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
+	"https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
