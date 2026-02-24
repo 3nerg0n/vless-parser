@@ -15,8 +15,8 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt"
 ]
 
-FILE_PATH_INT = "sub_vless_3nerg0n_92sh81"  # Основной файл
-FILE_PATH_RU = "Sub_ru"                     # Файл для RU конфигов
+FILE_PATH_ALL = "sub_vless_3nerg0n_92sh81"  # Все конфиги
+FILE_PATH_RU = "Sub_ru"                     # Только Россия
 
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
@@ -25,20 +25,27 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-# Списки ключевых слов
-KEYWORDS_INT = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇷", "france", "🇰🇿", "kazakhstan", "🇱🇻", "latvia", "🇨🇭", "switzerland", "🇸🇪", "sweden", "🇫🇮", "finland"]
-KEYWORDS_RU = ["🇷🇺", "russia", "ru"]
+# Ключевые слова для фильтрации (все страны)
+KEYWORDS_ALL = [
+    "🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇷", "france", 
+    "🇰🇿", "kazakhstan", "🇱🇻", "latvia", "🇨🇭", "switzerland", 
+    "🇸🇪", "sweden", "🇫🇮", "finland", "🇺🇸", "usa", "united states",
+    "🇷🇺", "russia", "ru" # Россия тоже входит в общий список
+]
+
+# Ключевые слова только для России
+KEYWORDS_RU_ONLY = ["🇷🇺", "russia", "ru"]
 
 def parse_vless_links(raw_data):
-    """Парсит ссылки и разделяет их на международные и российские"""
+    """Парсит ссылки и распределяет их: во все и отдельно в RU"""
     try:
         decoded_data = base64.b64decode(raw_data.strip()).decode('utf-8')
     except:
         decoded_data = raw_data
 
     lines = decoded_data.splitlines()
-    int_links = []
-    ru_links = []
+    all_found = []
+    ru_found = []
 
     for line in lines:
         line = line.strip()
@@ -48,28 +55,27 @@ def parse_vless_links(raw_data):
             parsed = urlparse(line)
             params = parse_qs(parsed.query)
             
-            # Фильтр по TCP + Reality (как в исходном коде)
+            # Фильтр: только TCP + Reality
             is_tcp = params.get('type', [''])[0].lower() == 'tcp'
             is_reality = params.get('security', [''])[0].lower() == 'reality'
-            
             if not (is_tcp and is_reality):
                 continue
 
             name = unquote(parsed.fragment).lower()
             
-            # Проверка на RU
-            if any(k in name for k in KEYWORDS_RU):
-                ru_links.append(line)
-            # Проверка на международные
-            elif any(k in name for k in KEYWORDS_INT):
-                int_links.append(line)
+            # 1. Проверяем для общего файла (все страны)
+            if any(k in name for k in KEYWORDS_ALL):
+                all_found.append(line)
+            
+            # 2. Проверяем отдельно для RU файла
+            if any(k in name for k in KEYWORDS_RU_ONLY):
+                ru_found.append(line)
         except:
             continue
             
-    return int_links, ru_links
+    return all_found, ru_found
 
 def get_data_with_retry(url, retries=3):
-    """Скачивает данные с одной ссылки"""
     for i in range(retries):
         try:
             response = requests.get(url, headers=HEADERS, timeout=30)
@@ -77,74 +83,64 @@ def get_data_with_retry(url, retries=3):
             return response.text
         except Exception as e:
             print(f"Ошибка при скачивании {url} (попытка {i+1}): {e}")
-            if i < retries - 1:
-                time.sleep(5)
-            else:
-                return ""
+            if i < retries - 1: time.sleep(5)
+            else: return ""
 
-def upload_to_github(repo, path, content, msg_tag):
-    """Вспомогательная функция для обновления файла в репозитории"""
+def upload_to_github(repo, path, links, description):
+    """Обновляет файл в GitHub, если есть изменения"""
+    content = "\n".join(list(dict.fromkeys(links))) if links else ""
+    
     try:
         try:
             contents = repo.get_contents(path)
-            # Если контент не изменился, не тратим лимиты API
             if contents.decoded_content.decode('utf-8') == content:
-                print(f"[{path}] Изменений нет. Пропускаем.")
+                print(f"[{path}] Изменений нет. Пропуск.")
                 return
 
             repo.update_file(
                 path=path,
-                message=f"Auto-update {msg_tag}: {len(content.splitlines())} configs",
+                message=f"Auto-update {description}: {len(links)} configs",
                 content=content,
                 sha=contents.sha
             )
-            print(f"[{path}] Файл обновлен!")
-        except Exception:
-            # Если файл не существует, создаем его
+            print(f"[{path}] Успешно обновлен.")
+        except:
             repo.create_file(
                 path=path,
-                message=f"Initial creation {msg_tag}",
+                message=f"Initial create {description}",
                 content=content
             )
             print(f"[{path}] Файл создан.")
     except Exception as e:
-        print(f"Ошибка при работе с GitHub для {path}: {e}")
+        print(f"Ошибка GitHub API для {path}: {e}")
 
 def update_github():
-    all_int_links = []
-    all_ru_links = []
+    final_all = []
+    final_ru = []
 
-    # 1. Собираем данные
+    # 1. Собираем данные со всех источников
     for url in SOURCE_URLS:
-        print(f"Обработка источника: {url}")
+        print(f"Обработка: {url}")
         raw_data = get_data_with_retry(url)
         if raw_data:
-            int_l, ru_l = parse_vless_links(raw_data)
-            all_int_links.extend(int_l)
-            all_ru_links.extend(ru_l)
-            print(f"Найдено: INT={len(int_l)}, RU={len(ru_l)}")
+            all_l, ru_l = parse_vless_links(raw_data)
+            final_all.extend(all_l)
+            final_ru.extend(ru_l)
+            print(f"Найдено: Всего={len(all_l)}, RU={len(ru_l)}")
 
-    # 2. Удаляем дубликаты
-    unique_int = list(dict.fromkeys(all_int_links))
-    unique_ru = list(dict.fromkeys(all_ru_links))
-    
-    print(f"Итого уникальных: INT={len(unique_int)}, RU={len(unique_ru)}")
-
-    # 3. Обновляем GitHub
+    # 2. Инициализируем GitHub
     try:
         g = Github(TOKEN)
         repo = g.get_repo(REPO_NAME)
         
-        # Обновляем основной международный файл
-        content_int = "\n".join(unique_int) if unique_int else ""
-        upload_to_github(repo, FILE_PATH_INT, content_int, "INT")
+        # Загружаем общий файл
+        upload_to_github(repo, FILE_PATH_ALL, final_all, "All Countries")
         
-        # Обновляем файл RU
-        content_ru = "\n".join(unique_ru) if unique_ru else ""
-        upload_to_github(repo, FILE_PATH_RU, content_ru, "RU")
+        # Загружаем файл только с RU
+        upload_to_github(repo, FILE_PATH_RU, final_ru, "Russia Only")
 
     except Exception as e:
-        print(f"Критическая ошибка GitHub API: {e}")
+        print(f"Критическая ошибка: {e}")
 
 if __name__ == "__main__":
     update_github()
