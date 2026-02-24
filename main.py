@@ -32,7 +32,7 @@ def parse_vless_links(raw_data):
 
     lines = decoded_data.splitlines()
     filtered_links = []
-    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇷", "france", "🇰🇿", "kazakhstan", "🇱🇻", "latvia", "🇨🇭", "switzerland", "🇸🇪", "sweden", "🇫🇮", "finland"]
+    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
 
     for line in lines:
         line = line.strip()
