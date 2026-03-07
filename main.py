@@ -7,15 +7,15 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
-    # "https://etoneya.a9fm.site/1",
-    # "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
+    "https://etoneya.a9fm.site/1",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
-    # "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
-    # "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
-    # "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-    # "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
-    # "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
-    # "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
+    "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+    "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
+    "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 # TOKEN нам больше не нужен для PyGithub, но оставим для совместимости, если он прописан в секретах
@@ -39,8 +39,7 @@ def parse_vless_links(raw_data):
     lines = decoded_data.splitlines()
     filtered_links = []
     # Список стран для фильтрации
-    target_keywords = ["🇩🇪", "germany"]
-    # target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "ru", "russia"]
+    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "ru", "russia"]
 
     for line in lines:
         line = line.strip()
