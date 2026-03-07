@@ -2,6 +2,7 @@ import os
 import requests
 import base64
 import time
+import socket
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
 
@@ -18,13 +19,36 @@ SOURCE_URLS = [
 	"https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
 	"https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
-FILE_PATH = "sub_vless_3nerg0n_92sh81"  # Файл без расширения
+FILE_PATH = "sub_vless_3nerg0n_92sh82"  # Файл без расширения
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 TOKEN = os.getenv("MY_GITHUB_TOKEN")
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
+
+def check_tcp_connectivity(link, timeout=3):
+    """Проверяет доступность TCP порта сервера"""
+    try:
+        parsed = urlparse(link)
+        # В vless://uuid@host:port host и port находятся в netloc
+        netloc = parsed.netloc
+        if '@' in netloc:
+            host_port = netloc.split('@')[1]
+        else:
+            host_port = netloc
+        
+        if ':' in host_port:
+            host, port = host_port.split(':')
+            port = int(port)
+        else:
+            host = host_port
+            port = 443 # по умолчанию для reality
+
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except:
+        return False
 
 def parse_vless_links(raw_data):
     """Парсит и фильтрует ссылки из сырых данных"""
@@ -89,7 +113,17 @@ def update_github():
 
     content = "\n".join(unique_links) if unique_links else ""
 
-    # 3. Обновляем GitHub
+	  # 3. ПРОВЕРКА НА ДОСТУПНОСТЬ (Check connectivity)
+    print("Начинаю проверку доступности серверов (TCP Check)...")
+    working_links = []
+    for link in unique_links:
+        if check_tcp_connectivity(link):
+            working_links.append(link)
+    
+    print(f"Итого рабочих конфигов: {len(working_links)}")
+    content = "\n".join(working_links) if working_links else ""
+
+    # 4. Обновляем GitHub
     try:
         g = Github(TOKEN)
         repo = g.get_repo(REPO_NAME)
