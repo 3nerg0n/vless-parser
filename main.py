@@ -5,6 +5,7 @@ import time
 import socket
 from urllib.parse import urlparse, parse_qs, unquote
 from github import Github
+from concurrent.futures import ThreadPoolExecutor
 
 # --- КОНФИГУРАЦИЯ ---
 # Теперь здесь список ссылок
@@ -112,16 +113,24 @@ def update_github():
     print(f"Всего уникальных конфигов после фильтрации: {len(unique_links)}")
 
     content = "\n".join(unique_links) if unique_links else ""
-
-	  # 3. ПРОВЕРКА НА ДОСТУПНОСТЬ (Check connectivity)
-    print("Начинаю проверку доступности серверов (TCP Check)...")
+	
+     # 3. ПРОВЕРКА НА ДОСТУПНОСТЬ (Многопоточная)
+    print("Начинаю быструю проверку доступности (Parallel TCP Check)...")
     working_links = []
-    for link in unique_links:
-        if check_tcp_connectivity(link):
-            working_links.append(link)
+    
+    # Запускаем проверку в 20 потоков
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        # Создаем список задач
+        results = list(executor.map(lambda l: (l, check_tcp_connectivity(l)), unique_links))
+        
+        # Собираем только те, что прошли проверку
+        for link, is_ok in results:
+            if is_ok:
+                working_links.append(link)
     
     print(f"Итого рабочих конфигов: {len(working_links)}")
     content = "\n".join(working_links) if working_links else ""
+
 
     # 4. Обновляем GitHub
     try:
