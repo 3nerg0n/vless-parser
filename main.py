@@ -39,8 +39,8 @@ def parse_vless_links(raw_data):
     lines = decoded_data.splitlines()
     filtered_links = []
     # Список стран для фильтрации
-    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "ru", "russia"]
-
+    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
+    
     for line in lines:
         line = line.strip()
         if not line.startswith("vless://"):
