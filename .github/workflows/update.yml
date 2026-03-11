@@ -23,4 +23,5 @@ jobs:
       - name: Run script
         env:
           MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          PYTHONUNBUFFERED: "1"
         run: python main.py
