@@ -5,6 +5,7 @@ import time
 import subprocess
 import socket
 from urllib.parse import urlparse, parse_qs, unquote
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
@@ -19,17 +20,18 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
+MAX_WORKERS = 20  # Количество одновременных потоков проверки
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def is_tcp_reachable(host, port, timeout=3):
-    """Проверяет, открыт ли TCP порт на сервере"""
+    """Проверяет, открыт ли TCP порт"""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
-    except (socket.timeout, ConnectionRefusedError, OSError):
+    except:
         return False
 
 def decode_base64(data):
@@ -42,43 +44,32 @@ def decode_base64(data):
     except:
         return data
 
-def parse_vless_links(raw_data):
-    decoded_data = decode_base64(raw_data)
-    lines = decoded_data.splitlines()
-    filtered_links = []
-    # Список стран для фильтрации
-    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
-    
-    for line in lines:
-        line = line.strip()
-        if not line.startswith("vless://"):
-            continue
-        try:
-            parsed = urlparse(line)
-            params = parse_qs(parsed.query)
-            
-            is_tcp = params.get('type', [''])[0].lower() == 'tcp'
-            is_reality = params.get('security', [''])[0].lower() == 'reality'
-            
-            if not (is_tcp and is_reality):
-                continue
+def check_single_link(line):
+    """Функция для проверки одной ссылки (для потоков)"""
+    try:
+        parsed = urlparse(line)
+        params = parse_qs(parsed.query)
+        
+        # Базовые фильтры протокола
+        is_tcp = params.get('type', [''])[0].lower() == 'tcp'
+        is_reality = params.get('security', [''])[0].lower() == 'reality'
+        
+        if not (is_tcp and is_reality):
+            return None
 
-            name = unquote(parsed.fragment).lower()
-            if any(k in name for k in target_keywords):
-                host = parsed.hostname
-                port = parsed.port if parsed.port else 443
-                
-                print(f"Проверка {host}:{port} ({unquote(parsed.fragment)})...", end=" ", flush=True)
-                
-                if is_tcp_reachable(host, port):
-                    print("✅ OK")
-                    filtered_links.append(line)
-                else:
-                    print("❌ DEAD")
-        except Exception as e:
-            print(f"Ошибка парсинга строки: {e}")
-            continue
-    return filtered_links
+        # Фильтр по странам в названии
+    target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
+        name = unquote(parsed.fragment).lower()
+        
+        if any(k in name for k in target_keywords):
+            host = parsed.hostname
+            port = int(parsed.port) if parsed.port else 443
+            
+            if is_tcp_reachable(host, port):
+                return line
+    except:
+        pass
+    return None
 
 def get_data_with_retry(url, retries=3):
     for i in range(retries):
@@ -87,7 +78,6 @@ def get_data_with_retry(url, retries=3):
             response.raise_for_status()
             return response.text
         except Exception as e:
-            print(f"Ошибка при скачивании {url} (попытка {i+1}): {e}")
             if i < retries - 1:
                 time.sleep(5)
     return ""
@@ -103,47 +93,64 @@ def update_repository(content, count):
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         f.write(content)
     
-    print(f"Файл сохранен локально ({len(content)} байт). Подготовка к отправке...")
-
     try:
         run_git_command('git config --global user.name "github-actions[bot]"')
         run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
-        
         run_git_command(f'git add {FILE_PATH}')
         
         status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
         if not status:
-            print("Изменений нет. Пропускаю обновление.")
+            print("Изменений нет.")
             return
 
-        run_git_command(f'git commit -m "Auto-update: {count} live configs"')
+        run_git_command(f'git commit -m "Auto-update: {count} verified links"')
         run_git_command('git push')
-        print("✅ Файл успешно обновлен и отправлен в репозиторий!")
-        
+        print(f"✅ Успешно обновлено: {count} конфигов")
     except Exception as e:
-        print(f"❌ Ошибка при работе с Git: {e}")
+        print(f"❌ Ошибка Git: {e}")
 
 def main():
-    all_filtered_links = []
+    raw_links = []
 
+    # 1. Сбор всех ссылок из всех источников
     for url in SOURCE_URLS:
-        print(f"\n--- Обработка источника: {url} ---")
-        raw_data = get_data_with_retry(url)
-        if raw_data:
-            links = parse_vless_links(raw_data)
-            all_filtered_links.extend(links)
-            print(f"Найдено живых конфигов в источнике: {len(links)}")
+        print(f"Скачивание: {url}")
+        data = get_data_with_retry(url)
+        if data:
+            decoded = decode_base64(data)
+            for line in decoded.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    raw_links.append(line)
 
-    # Удаляем дубликаты, сохраняя порядок
-    unique_links = list(dict.fromkeys(all_filtered_links))
-    print(f"\nИтого уникальных живых конфигов: {len(unique_links)}")
+    # Удаляем дубликаты перед проверкой, чтобы не тратить время
+    unique_raw = list(dict.fromkeys(raw_links))
+    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
 
-    if not unique_links:
-        print("Рабочие конфиги не найдены. Обновление отменено.")
+    # 2. Параллельная проверка
+    verified_links = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Запускаем задачи
+        future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
+        
+        completed = 0
+        for future in as_completed(future_to_link):
+            result = future.result()
+            if result:
+                verified_links.append(result)
+            
+            completed += 1
+            if completed % 50 == 0:
+                print(f"Проверено: {completed}/{len(unique_raw)}...")
+
+    print(f"Проверка завершена. Живых конфигов: {len(verified_links)}")
+
+    if not verified_links:
+        print("Нет рабочих конфигов.")
         return
 
-    content = "\n".join(unique_links)
-    update_repository(content, len(unique_links))
+    content = "\n".join(verified_links)
+    update_repository(content, len(verified_links))
 
 if __name__ == "__main__":
     main()
