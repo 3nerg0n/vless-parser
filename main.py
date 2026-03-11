@@ -3,6 +3,7 @@ import requests
 import base64
 import time
 import subprocess
+import socket
 from urllib.parse import urlparse, parse_qs, unquote
 
 # --- КОНФИГУРАЦИЯ ---
@@ -18,11 +19,18 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
-# TOKEN нам больше не нужен для PyGithub, но оставим для совместимости, если он прописан в секретах
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
+
+def is_tcp_reachable(host, port, timeout=3):
+    """Проверяет, открыт ли TCP порт на сервере"""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
 
 def decode_base64(data):
     data = data.strip()
@@ -57,8 +65,18 @@ def parse_vless_links(raw_data):
 
             name = unquote(parsed.fragment).lower()
             if any(k in name for k in target_keywords):
-                filtered_links.append(line)
-        except:
+                host = parsed.hostname
+                port = parsed.port if parsed.port else 443
+                
+                print(f"Проверка {host}:{port} ({unquote(parsed.fragment)})...", end=" ", flush=True)
+                
+                if is_tcp_reachable(host, port):
+                    print("✅ OK")
+                    filtered_links.append(line)
+                else:
+                    print("❌ DEAD")
+        except Exception as e:
+            print(f"Ошибка парсинга строки: {e}")
             continue
     return filtered_links
 
@@ -75,7 +93,6 @@ def get_data_with_retry(url, retries=3):
     return ""
 
 def run_git_command(command):
-    """Вспомогательная функция для запуска команд git"""
     try:
         subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
@@ -83,29 +100,23 @@ def run_git_command(command):
         raise
 
 def update_repository(content, count):
-    """Обновление файла через стандартный Git CLI"""
-    # 1. Сохраняем файл локально
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         f.write(content)
     
     print(f"Файл сохранен локально ({len(content)} байт). Подготовка к отправке...")
 
     try:
-        # Настройка бота (нужно для коммита)
         run_git_command('git config --global user.name "github-actions[bot]"')
         run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
         
-        # Добавляем файл в индекс
         run_git_command(f'git add {FILE_PATH}')
         
-        # Проверяем, есть ли реальные изменения
         status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
         if not status:
             print("Изменений нет. Пропускаю обновление.")
             return
 
-        # Коммит и пуш
-        run_git_command(f'git commit -m "Auto-update: {count} configs from multiple sources"')
+        run_git_command(f'git commit -m "Auto-update: {count} live configs"')
         run_git_command('git push')
         print("✅ Файл успешно обновлен и отправлен в репозиторий!")
         
@@ -116,18 +127,19 @@ def main():
     all_filtered_links = []
 
     for url in SOURCE_URLS:
-        print(f"Обработка источника: {url}")
+        print(f"\n--- Обработка источника: {url} ---")
         raw_data = get_data_with_retry(url)
         if raw_data:
             links = parse_vless_links(raw_data)
             all_filtered_links.extend(links)
-            print(f"Найдено подходящих конфигов: {len(links)}")
+            print(f"Найдено живых конфигов в источнике: {len(links)}")
 
+    # Удаляем дубликаты, сохраняя порядок
     unique_links = list(dict.fromkeys(all_filtered_links))
-    print(f"Всего уникальных конфигов после фильтрации: {len(unique_links)}")
+    print(f"\nИтого уникальных живых конфигов: {len(unique_links)}")
 
     if not unique_links:
-        print("Конфиги не найдены. Обновление отменено.")
+        print("Рабочие конфиги не найдены. Обновление отменено.")
         return
 
     content = "\n".join(unique_links)
