@@ -2,7 +2,7 @@ name: Update VLESS Configs
 
 on:
   schedule:
-    - cron: '0 * * * *' # Раз в час
+    - cron: '0 */3 * * *' # Раз в час
   workflow_dispatch:
 
 jobs:
