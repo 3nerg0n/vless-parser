@@ -1,6 +1,7 @@
 import os
 import requests
 import base64
+import json
 import time
 import subprocess
 import socket
@@ -20,8 +21,7 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 
-# Имя файла подписки для iOS (v2raytun)
-IOS_SUB_FILE = "sub_vless_ios"
+STREISAND_FILE = "streisand_config.json"
 MAX_WORKERS = 100 
 
 def is_tcp_reachable(host, port, timeout=1.5):
@@ -31,89 +31,125 @@ def is_tcp_reachable(host, port, timeout=1.5):
     except:
         return False
 
-def check_single_link(line):
-    """Проверяет ссылку и добавляет теги для iOS"""
+def vless_to_outbound(link):
     try:
-        parsed = urlparse(line)
-        params = parse_qs(parsed.query)
+        p = urlparse(link)
+        qs = parse_qs(p.query)
+        if qs.get('security', [''])[0].lower() != 'reality': return None
+        host, port = p.hostname, int(p.port) if p.port else 443
+        if not is_tcp_reachable(host, port): return None
         
-        if params.get('security', [''])[0].lower() != 'reality':
-            return None
+        return {
+            "type": "vless",
+            "tag": unquote(p.fragment) or host,
+            "server": host,
+            "server_port": port,
+            "uuid": p.username,
+            "packet_encoding": "xudp",
+            "tls": {
+                "enabled": True,
+                "server_name": qs.get('sni', [''])[0],
+                "utls": {"enabled": True, "fingerprint": qs.get('fp', ['chrome'])[0]},
+                "reality": {
+                    "enabled": True,
+                    "public_key": qs.get('pbk', [''])[0],
+                    "short_id": qs.get('sid', [''])[0]
+                }
+            }
+        }
+    except: return None
 
-        host = parsed.hostname
-        port = int(parsed.port) if parsed.port else 443
-        
-        if is_tcp_reachable(host, port):
-            name = unquote(parsed.fragment)
-            name_low = name.lower()
-            
-            # Добавляем эмодзи для визуального разделения в v2raytun
-            tag = "🌐"
-            if any(x in name_low for x in ["de", "germany", "nl", "netherlands"]): tag = "⚡️"
-            if any(x in name_low for x in ["us", "usa", "sg", "singapore"]): tag = "🤖"
-            if any(x in name_low for x in ["ru", "russia", "fi", "lv"]): tag = "✈️"
-            
-            # Собираем ссылку обратно с красивым именем
-            new_line = line.split('#')[0] + f"#{tag} {name}"
-            return new_line
-    except:
-        pass
-    return None
+def generate_streisand_json(nodes):
+    tags = [n["tag"] for n in nodes]
+    # Фильтруем узлы для спец-задач
+    ai_tags = [t for t in tags if any(x in t.lower() for x in ["us", "sg", "nl", "usa", "singapore"])]
+    
+    config = {
+        "log": {"level": "info"},
+        "dns": {
+            "servers": [
+                {"tag": "dns-remote", "address": "https://8.8.8.8/dns-query", "detour": "🚀 AUTO-SELECT"},
+                {"tag": "dns-direct", "address": "8.8.8.8", "detour": "direct"}
+            ],
+            "rules": [{"outbound": "any", "server": "dns-remote"}]
+        },
+        "outbounds": [
+            # 1. Авто-выбор (самый быстрый для YouTube/TG)
+            {
+                "type": "urltest",
+                "tag": "🚀 AUTO-SELECT",
+                "outbounds": tags[:50],
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": "1m"
+            },
+            # 2. Группа для Нейросетей
+            {
+                "type": "urltest",
+                "tag": "🤖 AI-UNBLOCK",
+                "outbounds": ai_tags[:15] if ai_tags else tags[:15],
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": "5m"
+            },
+            # 3. Ручной выбор
+            {
+                "type": "selector",
+                "tag": "Manual-Select",
+                "outbounds": ["🚀 AUTO-SELECT", "🤖 AI-UNBLOCK"] + tags
+            },
+            {"type": "direct", "tag": "direct"},
+            {"type": "dns", "tag": "dns-out"}
+        ] + nodes,
+        "route": {
+            "rules": [
+                {"protocol": "dns", "outbound": "dns-out"},
+                # Правила для AI
+                {"domain_suffix": ["openai.com", "chatgpt.com", "anthropic.com", "claude.ai"], "outbound": "🤖 AI-UNBLOCK"},
+                # Правила для YouTube и Telegram
+                {"domain_suffix": ["youtube.com", "googlevideo.com", "ytimg.com", "t.me", "telegram.org"], "outbound": "🚀 AUTO-SELECT"},
+                {"network": "tcp", "outbound": "🚀 AUTO-SELECT"}
+            ],
+            "final": "🚀 AUTO-SELECT",
+            "auto_detect_interface": True
+        }
+    }
+    return json.dumps(config, indent=2, ensure_ascii=False)
 
 def main():
     raw_links = []
-    print("--- Сбор данных для iOS ---")
     for url in SOURCE_URLS:
         try:
             res = requests.get(url, timeout=15)
-            if res.status_code == 200:
-                data = res.text
-                if "vless://" not in data:
-                    try: data = base64.b64decode(data).decode('utf-8')
-                    except: pass
-                for line in data.splitlines():
-                    if line.strip().startswith("vless://"):
-                        raw_links.append(line.strip())
+            data = res.text
+            if "vless://" not in data:
+                try: data = base64.b64decode(data).decode('utf-8')
+                except: pass
+            for line in data.splitlines():
+                if line.strip().startswith("vless://"): raw_links.append(line.strip())
         except: continue
 
     unique_raw = list(dict.fromkeys(raw_links))
     print(f"Найдено {len(unique_raw)} ссылок. Проверка...")
 
-    verified_links = []
+    valid_nodes = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(check_single_link, link) for link in unique_raw]
+        futures = [executor.submit(vless_to_outbound, link) for link in unique_raw]
         for future in as_completed(futures):
             res = future.result()
-            if res: verified_links.append(res)
+            if res: valid_nodes.append(res)
 
-    if not verified_links:
-        print("Рабочих серверов нет.")
-        return
-
-    # Сортируем: сначала Европа и РФ (для скорости), потом всё остальное
-    verified_links.sort(key=lambda x: any(c in x.lower() for c in ["⚡️", "✈️"]), reverse=True)
-
-    # Создаем Base64 подписку (именно это нужно для iOS)
-    sub_content = "\n".join(verified_links)
-    b64_sub = base64.b64encode(sub_content.encode('utf-8')).decode('utf-8')
-
-    with open(IOS_SUB_FILE, "w", encoding="utf-8") as f:
-        f.write(b64_sub)
-
-    # Отправка в GitHub
-    try:
-        subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
-        subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
-        subprocess.run(f'git add {IOS_SUB_FILE}', shell=True)
+    if valid_nodes:
+        config_json = generate_streisand_json(valid_nodes)
+        with open(STREISAND_FILE, "w", encoding="utf-8") as f:
+            f.write(config_json)
         
-        status = subprocess.run('git status --porcelain', shell=True, capture_output=True, text=True).stdout.strip()
-        if not status: return
-
-        subprocess.run(f'git commit -m "Update iOS Subscription: {len(verified_links)} nodes"', shell=True)
-        subprocess.run('git push', shell=True)
-        print(f"🚀 Подписка для iOS обновлена!")
-    except Exception as e:
-        print(f"Ошибка: {e}")
+        try:
+            subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
+            subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
+            subprocess.run(f'git add {STREISAND_FILE}', shell=True)
+            subprocess.run('git commit -m "Update Streisand Smart Config"', shell=True)
+            subprocess.run('git push', shell=True)
+            print("✅ Конфиг для Streisand готов!")
+        except: pass
 
 if __name__ == "__main__":
     main()
