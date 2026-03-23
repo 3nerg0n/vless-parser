@@ -19,84 +19,138 @@ SOURCE_URLS = [
     "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
+FILE_PATH = "sub_vless_3nerg0n_92sh81" 
+MAX_WORKERS = 20  # Количество одновременных потоков проверки
 
-FILE_PATH = "sub_streisand" 
-MAX_WORKERS = 100 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
 
-def is_tcp_reachable(host, port, timeout=1.5):
+def is_tcp_reachable(host, port, timeout=3):
+    """Проверяет, открыт ли TCP порт"""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except:
         return False
 
+def decode_base64(data):
+    data = data.strip()
+    try:
+        missing_padding = len(data) % 4
+        if missing_padding:
+            data += '=' * (4 - missing_padding)
+        return base64.b64decode(data).decode('utf-8')
+    except:
+        return data
+
 def check_single_link(line):
+    """Функция для проверки одной ссылки (для потоков)"""
     try:
         parsed = urlparse(line)
         params = parse_qs(parsed.query)
         
-        if params.get('security', [''])[0].lower() != 'reality':
+        # Базовые фильтры протокола
+        is_tcp = params.get('type', [''])[0].lower() == 'tcp'
+        is_reality = params.get('security', [''])[0].lower() == 'reality'
+        
+        if not (is_tcp and is_reality):
             return None
 
-        host = parsed.hostname
-        port = int(parsed.port) if parsed.port else 443
+        # Фильтр по странам в названии
+        target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
+        name = unquote(parsed.fragment).lower()
         
-        if is_tcp_reachable(host, port):
-            name = unquote(parsed.fragment)
-            name_low = name.lower()
+        if any(k in name for k in target_keywords):
+            host = parsed.hostname
+            port = int(parsed.port) if parsed.port else 443
             
-            # Добавляем теги для маршрутизации в Streisand
-            tag = "[GEN]"
-            if any(x in name_low for x in ["de", "germany", "nl", "netherlands", "fi", "ru"]): tag = "[YT-TG]"
-            if any(x in name_low for x in ["us", "usa", "sg", "singapore"]): tag = "[AI]"
-            
-            # Собираем ссылку с тегом в начале названия
-            new_line = line.split('#')[0] + f"#{tag} {name}"
-            return new_line
+            if is_tcp_reachable(host, port):
+                return line
     except:
         pass
     return None
 
+def get_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except Exception as e:
+            if i < retries - 1:
+                time.sleep(5)
+    return ""
+
+def run_git_command(command):
+    try:
+        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Ошибка Git: {e.stderr}")
+        raise
+
+def update_repository(content, count):
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    try:
+        run_git_command('git config --global user.name "github-actions[bot]"')
+        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+        run_git_command(f'git add {FILE_PATH}')
+        
+        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
+        if not status:
+            print("Изменений нет.")
+            return
+
+        run_git_command(f'git commit -m "Auto-update: {count} verified links"')
+        run_git_command('git push')
+        print(f"✅ Успешно обновлено: {count} конфигов")
+    except Exception as e:
+        print(f"❌ Ошибка Git: {e}")
+
 def main():
     raw_links = []
+
+    # 1. Сбор всех ссылок из всех источников
     for url in SOURCE_URLS:
-        try:
-            res = requests.get(url, timeout=15)
-            data = res.text
-            if "vless://" not in data:
-                try: data = base64.b64decode(data).decode('utf-8')
-                except: pass
-            for line in data.splitlines():
-                if line.strip().startswith("vless://"):
-                    raw_links.append(line.strip())
-        except: continue
+        print(f"Скачивание: {url}")
+        data = get_data_with_retry(url)
+        if data:
+            decoded = decode_base64(data)
+            for line in decoded.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    raw_links.append(line)
 
+    # Удаляем дубликаты перед проверкой, чтобы не тратить время
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} ссылок. Проверка...")
+    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
 
+    # 2. Параллельная проверка
     verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(check_single_link, link) for link in unique_raw]
-        for future in as_completed(futures):
-            res = future.result()
-            if res: verified_links.append(res)
+        # Запускаем задачи
+        future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
+        
+        completed = 0
+        for future in as_completed(future_to_link):
+            result = future.result()
+            if result:
+                verified_links.append(result)
+            
+            completed += 1
+            if completed % 50 == 0:
+                print(f"Проверено: {completed}/{len(unique_raw)}...")
 
-    if verified_links:
-        # Создаем Base64 строку (стандарт подписки)
-        sub_content = "\n".join(verified_links)
-        b64_sub = base64.b64encode(sub_content.encode('utf-8')).decode('utf-8')
+    print(f"Проверка завершена. Живых конфигов: {len(verified_links)}")
 
-        with open(FILE_PATH, "w", encoding="utf-8") as f:
-            f.write(b64_sub)
+    if not verified_links:
+        print("Нет рабочих конфигов.")
+        return
 
-        try:
-            subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
-            subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
-            subprocess.run(f'git add {FILE_PATH}', shell=True)
-            subprocess.run(f'git commit -m "Update Streisand Sub: {len(verified_links)} nodes"', shell=True)
-            subprocess.run('git push', shell=True)
-            print("✅ Подписка для Streisand обновлена!")
-        except: pass
+    content = "\n".join(verified_links)
+    update_repository(content, len(verified_links))
 
 if __name__ == "__main__":
     main()
