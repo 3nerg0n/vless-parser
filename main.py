@@ -1,6 +1,7 @@
 import os
 import requests
 import base64
+import json
 import time
 import subprocess
 import socket
@@ -19,8 +20,9 @@ SOURCE_URLS = [
     "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
-# Это файл вашей подписки (одна ссылка для приложения)
-FILE_PATH = "sub_vless_3nerg0n_92sh81" 
+
+# Имя итогового файла
+SMART_CONFIG_FILE = "smart_super_server.json"
 MAX_WORKERS = 100 
 
 def is_tcp_reachable(host, port, timeout=1.5):
@@ -30,49 +32,89 @@ def is_tcp_reachable(host, port, timeout=1.5):
     except:
         return False
 
-def check_single_link(line):
+def vless_to_outbound(link):
+    """Преобразует VLESS ссылку в формат Sing-box outbound"""
     try:
-        parsed = urlparse(line)
-        params = parse_qs(parsed.query)
+        p = urlparse(link)
+        qs = parse_qs(p.query)
         
-        # Фильтруем только Reality
-        if params.get('security', [''])[0].lower() != 'reality':
+        # Проверяем только Reality
+        if qs.get('security', [''])[0].lower() != 'reality':
             return None
 
-        host = parsed.hostname
-        port = int(parsed.port) if parsed.port else 443
+        host = p.hostname
+        port = int(p.port) if p.port else 443
         
-        if is_tcp_reachable(host, port):
-            # Добавляем метку в название для удобства балансировки
-            name = unquote(parsed.fragment)
-            # Если сервер из нужных нам стран, помечаем его
-            tag = ""
-            name_low = name.lower()
-            if any(x in name_low for x in ["de", "nl", "fi", "ru"]): tag = "🚀"
-            if any(x in name_low for x in ["us", "sg"]): tag = "🤖"
-            
-            new_line = line.split('#')[0] + f"#{tag}{name}"
-            return new_line
-    except:
-        pass
-    return None
+        if not is_tcp_reachable(host, port):
+            return None
 
-def update_repository(content, count):
-    # Кодируем в Base64, чтобы приложение восприняло это как единую подписку
-    b64_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-    
-    with open(FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(b64_content)
-    
-    try:
-        subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
-        subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
-        subprocess.run(f'git add {FILE_PATH}', shell=True)
-        subprocess.run(f'git commit -m "Update Super-Subscription: {count} live nodes"', shell=True)
-        subprocess.run('git push', shell=True)
-        print(f"✅ Подписка обновлена: {count} серверов")
+        tag = unquote(p.fragment) or host
+        
+        return {
+            "type": "vless",
+            "tag": tag,
+            "server": host,
+            "server_port": port,
+            "uuid": p.username,
+            "packet_encoding": "xudp",
+            "tls": {
+                "enabled": True,
+                "server_name": qs.get('sni', [''])[0],
+                "utls": {"enabled": True, "fingerprint": qs.get('fp', ['chrome'])[0]},
+                "reality": {
+                    "enabled": True,
+                    "public_key": qs.get('pbk', [''])[0],
+                    "short_id": qs.get('sid', [''])[0]
+                }
+            }
+        }
     except:
-        pass
+        return None
+
+def generate_smart_json(outbounds):
+    """Создает структуру Sing-box с балансировкой и правилами"""
+    tags = [o["tag"] for o in outbounds]
+    
+    # Группируем теги по странам для правил
+    media_tags = [t for t in tags if any(x in t.lower() for x in ["de", "nl", "fi", "ru", "germany", "netherlands"])]
+    ai_tags = [t for t in tags if any(x in t.lower() for x in ["us", "sg", "nl", "usa", "singapore"])]
+
+    config = {
+        "outbounds": [
+            # 1. Авто-выбор (основной балансировщик)
+            {
+                "type": "urltest",
+                "tag": "🚀 AUTO-SELECT (FASTEST)",
+                "outbounds": tags[:50], # Берем топ-50 живых
+                "interval": "1m",
+                "idle_timeout": "30m"
+            },
+            # 2. Группа для ИИ
+            {
+                "type": "urltest",
+                "tag": "🤖 AI-UNBLOCK-PATH",
+                "outbounds": ai_tags[:20] if ai_tags else tags[:20],
+                "interval": "5m"
+            }
+        ] + outbounds,
+        "route": {
+            "rules": [
+                # Правила для нейросетей
+                {
+                    "domain_suffix": ["openai.com", "chatgpt.com", "anthropic.com", "claude.ai", "bing.com"],
+                    "outbound": "🤖 AI-UNBLOCK-PATH"
+                },
+                # Правила для YouTube и Telegram
+                {
+                    "domain_suffix": ["youtube.com", "googlevideo.com", "ytimg.com", "t.me", "telegram.org"],
+                    "outbound": "🚀 AUTO-SELECT (FASTEST)"
+                }
+            ],
+            "final": "🚀 AUTO-SELECT (FASTEST)",
+            "auto_detect_interface": True
+        }
+    }
+    return json.dumps(config, indent=2, ensure_ascii=False)
 
 def main():
     raw_links = []
@@ -89,19 +131,36 @@ def main():
         except: continue
 
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} ссылок. Проверка...")
+    print(f"Найдено {len(unique_raw)} ссылок. Начинаю проверку и сборку умного конфига...")
 
-    verified_links = []
+    valid_outbounds = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(check_single_link, link) for link in unique_raw]
+        futures = [executor.submit(vless_to_outbound, link) for link in unique_raw]
         for future in as_completed(futures):
             res = future.result()
-            if res: verified_links.append(res)
+            if res:
+                valid_outbounds.append(res)
 
-    if verified_links:
-        # Сортируем: сначала самые быстрые (Германия, Нидерланды)
-        verified_links.sort(key=lambda x: "🚀" not in x)
-        update_repository("\n".join(verified_links), len(verified_links))
+    if not valid_outbounds:
+        print("Нет рабочих серверов.")
+        return
+
+    # Генерируем JSON
+    smart_json = generate_smart_json(valid_outbounds)
+    
+    with open(SMART_CONFIG_FILE, "w", encoding="utf-8") as f:
+        f.write(smart_json)
+
+    # Отправка в репозиторий
+    try:
+        subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
+        subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
+        subprocess.run(f'git add {SMART_CONFIG_FILE}', shell=True)
+        subprocess.run('git commit -m "Update Smart Super Config"', shell=True)
+        subprocess.run('git push', shell=True)
+        print(f"✅ Умный конфиг успешно обновлен! Найдено {len(valid_outbounds)} узлов.")
+    except Exception as e:
+        print(f"Ошибка Git: {e}")
 
 if __name__ == "__main__":
     main()
