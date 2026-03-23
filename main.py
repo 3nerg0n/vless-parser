@@ -37,6 +37,9 @@ def is_tcp_reachable(host, port, timeout=3):
 def decode_base64(data):
     data = data.strip()
     try:
+        # Проверка, не является ли строка уже ссылкой (чтобы не портить)
+        if data.startswith("vless://"):
+            return data
         missing_padding = len(data) % 4
         if missing_padding:
             data += '=' * (4 - missing_padding)
@@ -111,26 +114,43 @@ def update_repository(content, count):
 
 def main():
     raw_links = []
+    stats = {} # Словарь для хранения статистики по источникам
 
+    print("--- Сбор данных из источников ---")
     # 1. Сбор всех ссылок из всех источников
     for url in SOURCE_URLS:
-        print(f"Скачивание: {url}")
+        print(f"Загрузка: {url}...", end=" ", flush=True)
         data = get_data_with_retry(url)
+        source_count = 0
+        
         if data:
             decoded = decode_base64(data)
             for line in decoded.splitlines():
                 line = line.strip()
                 if line.startswith("vless://"):
                     raw_links.append(line)
+                    source_count += 1
+            print(f"найдено {source_count} ссылок.")
+        else:
+            print("ошибка загрузки.")
+        
+        stats[url] = source_count
 
-    # Удаляем дубликаты перед проверкой, чтобы не тратить время
+    # Вывод итоговой таблицы по источникам
+    print("\n--- Итоговая статистика сбора ---")
+    for url, count in stats.items():
+        domain = urlparse(url).netloc
+        path = urlparse(url).path[-15:] # последние 15 символов пути для краткости
+        print(f"[{count:4}] {domain}...{path}")
+
+    # Удаляем дубликаты перед проверкой
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
+    print(f"\nВсего уникальных ссылок для проверки: {len(unique_raw)}")
+    print(f"Начинаю мультипроверку в {MAX_WORKERS} потоков...")
 
     # 2. Параллельная проверка
     verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Запускаем задачи
         future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
         
         completed = 0
@@ -140,10 +160,10 @@ def main():
                 verified_links.append(result)
             
             completed += 1
-            if completed % 50 == 0:
-                print(f"Проверено: {completed}/{len(unique_raw)}...")
+            if completed % 50 == 0 or completed == len(unique_raw):
+                print(f"Прогресс: {completed}/{len(unique_raw)}...")
 
-    print(f"Проверка завершена. Живых конфигов: {len(verified_links)}")
+    print(f"\nПроверка завершена. Рабочих конфигов (прошли фильтры и TCP): {len(verified_links)}")
 
     if not verified_links:
         print("Нет рабочих конфигов.")
