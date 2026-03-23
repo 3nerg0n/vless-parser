@@ -1,7 +1,6 @@
 import os
 import requests
 import base64
-import json
 import time
 import subprocess
 import socket
@@ -21,7 +20,7 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 
-STREISAND_FILE = "streisand_config.json"
+FILE_PATH = "sub_streisand" 
 MAX_WORKERS = 100 
 
 def is_tcp_reachable(host, port, timeout=1.5):
@@ -31,88 +30,32 @@ def is_tcp_reachable(host, port, timeout=1.5):
     except:
         return False
 
-def vless_to_outbound(link):
+def check_single_link(line):
     try:
-        p = urlparse(link)
-        qs = parse_qs(p.query)
-        if qs.get('security', [''])[0].lower() != 'reality': return None
-        host, port = p.hostname, int(p.port) if p.port else 443
-        if not is_tcp_reachable(host, port): return None
+        parsed = urlparse(line)
+        params = parse_qs(parsed.query)
         
-        return {
-            "type": "vless",
-            "tag": unquote(p.fragment) or host,
-            "server": host,
-            "server_port": port,
-            "uuid": p.username,
-            "packet_encoding": "xudp",
-            "tls": {
-                "enabled": True,
-                "server_name": qs.get('sni', [''])[0],
-                "utls": {"enabled": True, "fingerprint": qs.get('fp', ['chrome'])[0]},
-                "reality": {
-                    "enabled": True,
-                    "public_key": qs.get('pbk', [''])[0],
-                    "short_id": qs.get('sid', [''])[0]
-                }
-            }
-        }
-    except: return None
+        if params.get('security', [''])[0].lower() != 'reality':
+            return None
 
-def generate_streisand_json(nodes):
-    tags = [n["tag"] for n in nodes]
-    # Фильтруем узлы для спец-задач
-    ai_tags = [t for t in tags if any(x in t.lower() for x in ["us", "sg", "nl", "usa", "singapore"])]
-    
-    config = {
-        "log": {"level": "info"},
-        "dns": {
-            "servers": [
-                {"tag": "dns-remote", "address": "https://8.8.8.8/dns-query", "detour": "🚀 AUTO-SELECT"},
-                {"tag": "dns-direct", "address": "8.8.8.8", "detour": "direct"}
-            ],
-            "rules": [{"outbound": "any", "server": "dns-remote"}]
-        },
-        "outbounds": [
-            # 1. Авто-выбор (самый быстрый для YouTube/TG)
-            {
-                "type": "urltest",
-                "tag": "🚀 AUTO-SELECT",
-                "outbounds": tags[:50],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": "1m"
-            },
-            # 2. Группа для Нейросетей
-            {
-                "type": "urltest",
-                "tag": "🤖 AI-UNBLOCK",
-                "outbounds": ai_tags[:15] if ai_tags else tags[:15],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": "5m"
-            },
-            # 3. Ручной выбор
-            {
-                "type": "selector",
-                "tag": "Manual-Select",
-                "outbounds": ["🚀 AUTO-SELECT", "🤖 AI-UNBLOCK"] + tags
-            },
-            {"type": "direct", "tag": "direct"},
-            {"type": "dns", "tag": "dns-out"}
-        ] + nodes,
-        "route": {
-            "rules": [
-                {"protocol": "dns", "outbound": "dns-out"},
-                # Правила для AI
-                {"domain_suffix": ["openai.com", "chatgpt.com", "anthropic.com", "claude.ai"], "outbound": "🤖 AI-UNBLOCK"},
-                # Правила для YouTube и Telegram
-                {"domain_suffix": ["youtube.com", "googlevideo.com", "ytimg.com", "t.me", "telegram.org"], "outbound": "🚀 AUTO-SELECT"},
-                {"network": "tcp", "outbound": "🚀 AUTO-SELECT"}
-            ],
-            "final": "🚀 AUTO-SELECT",
-            "auto_detect_interface": True
-        }
-    }
-    return json.dumps(config, indent=2, ensure_ascii=False)
+        host = parsed.hostname
+        port = int(parsed.port) if parsed.port else 443
+        
+        if is_tcp_reachable(host, port):
+            name = unquote(parsed.fragment)
+            name_low = name.lower()
+            
+            # Добавляем теги для маршрутизации в Streisand
+            tag = "[GEN]"
+            if any(x in name_low for x in ["de", "germany", "nl", "netherlands", "fi", "ru"]): tag = "[YT-TG]"
+            if any(x in name_low for x in ["us", "usa", "sg", "singapore"]): tag = "[AI]"
+            
+            # Собираем ссылку с тегом в начале названия
+            new_line = line.split('#')[0] + f"#{tag} {name}"
+            return new_line
+    except:
+        pass
+    return None
 
 def main():
     raw_links = []
@@ -124,31 +67,35 @@ def main():
                 try: data = base64.b64decode(data).decode('utf-8')
                 except: pass
             for line in data.splitlines():
-                if line.strip().startswith("vless://"): raw_links.append(line.strip())
+                if line.strip().startswith("vless://"):
+                    raw_links.append(line.strip())
         except: continue
 
     unique_raw = list(dict.fromkeys(raw_links))
     print(f"Найдено {len(unique_raw)} ссылок. Проверка...")
 
-    valid_nodes = []
+    verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(vless_to_outbound, link) for link in unique_raw]
+        futures = [executor.submit(check_single_link, link) for link in unique_raw]
         for future in as_completed(futures):
             res = future.result()
-            if res: valid_nodes.append(res)
+            if res: verified_links.append(res)
 
-    if valid_nodes:
-        config_json = generate_streisand_json(valid_nodes)
-        with open(STREISAND_FILE, "w", encoding="utf-8") as f:
-            f.write(config_json)
-        
+    if verified_links:
+        # Создаем Base64 строку (стандарт подписки)
+        sub_content = "\n".join(verified_links)
+        b64_sub = base64.b64encode(sub_content.encode('utf-8')).decode('utf-8')
+
+        with open(FILE_PATH, "w", encoding="utf-8") as f:
+            f.write(b64_sub)
+
         try:
             subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
             subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
-            subprocess.run(f'git add {STREISAND_FILE}', shell=True)
-            subprocess.run('git commit -m "Update Streisand Smart Config"', shell=True)
+            subprocess.run(f'git add {FILE_PATH}', shell=True)
+            subprocess.run(f'git commit -m "Update Streisand Sub: {len(verified_links)} nodes"', shell=True)
             subprocess.run('git push', shell=True)
-            print("✅ Конфиг для Streisand готов!")
+            print("✅ Подписка для Streisand обновлена!")
         except: pass
 
 if __name__ == "__main__":
