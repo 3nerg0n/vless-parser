@@ -32,7 +32,6 @@ def is_tcp_reachable(host, port, timeout=1.5):
         return False
 
 def vless_to_outbound(link):
-    """Преобразует VLESS в объект Sing-box"""
     try:
         p = urlparse(link)
         qs = parse_qs(p.query)
@@ -61,39 +60,41 @@ def vless_to_outbound(link):
     except: return None
 
 def generate_full_config(nodes):
-    """Создает структуру Sing-box с балансировщиком и DNS"""
     tags = [n["tag"] for n in nodes]
     
-    # Группируем теги для спец-задач
-    ai_tags = [t for t in tags if any(x in t.lower() for x in ["us", "sg", "nl", "usa", "singapore"])]
-
     config = {
         "log": {"level": "info"},
         "dns": {
             "servers": [
-                {"tag": "dns-remote", "address": "https://8.8.8.8/dns-query", "detour": "🚀 AUTO-BALANCER"},
+                {"tag": "dns-remote", "address": "https://1.1.1.1/dns-query", "detour": "🚀 AUTO-SELECT"},
                 {"tag": "dns-direct", "address": "8.8.8.8", "detour": "direct"}
             ],
-            "rules": [{"outbound": "any", "server": "dns-remote"}]
+            "rules": [
+                {"outbound": "any", "server": "dns-remote"}
+            ],
+            "strategy": "prefer_ipv4"
         },
-        "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080, "sniff": True}],
+        "inbounds": [
+            {
+                "type": "mixed",
+                "tag": "🚀 СУПЕР-СЕРВЕР",
+                "listen": "127.0.0.1",
+                "listen_port": 2080,
+                "sniff": True
+            }
+        ],
         "outbounds": [
-            # ГЛАВНЫЙ БАЛАНСИРОВЩИК (URL-Test)
             {
                 "type": "urltest",
-                "tag": "🚀 AUTO-BALANCER",
-                "outbounds": tags[:50], # Топ-50 серверов
+                "tag": "🚀 AUTO-SELECT",
+                "outbounds": tags[:50],
                 "url": "https://www.gstatic.com/generate_204",
-                "interval": "1m",
-                "tolerance": 50
+                "interval": "1m"
             },
-            # БАЛАНСИРОВЩИК ДЛЯ ИИ
             {
-                "type": "urltest",
-                "tag": "🤖 AI-BALANCER",
-                "outbounds": ai_tags[:15] if ai_tags else tags[:15],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": "5m"
+                "type": "selector",
+                "tag": "Manual-Select (Выбрать вручную)",
+                "outbounds": ["🚀 AUTO-SELECT"] + tags
             },
             {"type": "direct", "tag": "direct"},
             {"type": "dns", "tag": "dns-out"}
@@ -101,10 +102,10 @@ def generate_full_config(nodes):
         "route": {
             "rules": [
                 {"protocol": "dns", "outbound": "dns-out"},
-                {"domain_suffix": ["openai.com", "chatgpt.com", "anthropic.com", "claude.ai"], "outbound": "🤖 AI-BALANCER"},
-                {"domain_suffix": ["youtube.com", "googlevideo.com", "ytimg.com", "t.me", "telegram.org"], "outbound": "🚀 AUTO-BALANCER"}
+                {"network": "udp", "port": 443, "outbound": "direct"}, # Пропуск QUIC для YouTube (иногда помогает)
+                {"domain_suffix": ["youtube.com", "googlevideo.com", "openai.com", "t.me"], "outbound": "🚀 AUTO-SELECT"}
             ],
-            "final": "🚀 AUTO-BALANCER",
+            "final": "🚀 AUTO-SELECT",
             "auto_detect_interface": True
         }
     }
@@ -142,9 +143,9 @@ def main():
             subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
             subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
             subprocess.run(f'git add {CONFIG_FILENAME}', shell=True)
-            subprocess.run('git commit -m "Update Smart Balancer JSON"', shell=True)
+            subprocess.run('git commit -m "Fix Streisand Config"', shell=True)
             subprocess.run('git push', shell=True)
-            print("✅ Балансировщик готов!")
+            print("✅ Конфиг обновлен!")
         except: pass
 
 if __name__ == "__main__":
