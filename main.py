@@ -1,6 +1,7 @@
 import os
 import requests
 import base64
+import json
 import time
 import subprocess
 import socket
@@ -19,138 +20,132 @@ SOURCE_URLS = [
     "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
-FILE_PATH = "sub_vless_3nerg0n_92sh81" 
-MAX_WORKERS = 20  # Количество одновременных потоков проверки
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
+CONFIG_FILENAME = "auto_balancer.json"
+MAX_WORKERS = 100 
 
-def is_tcp_reachable(host, port, timeout=3):
-    """Проверяет, открыт ли TCP порт"""
+def is_tcp_reachable(host, port, timeout=1.5):
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except:
         return False
 
-def decode_base64(data):
-    data = data.strip()
+def vless_to_outbound(link):
+    """Преобразует VLESS в объект Sing-box"""
     try:
-        missing_padding = len(data) % 4
-        if missing_padding:
-            data += '=' * (4 - missing_padding)
-        return base64.b64decode(data).decode('utf-8')
-    except:
-        return data
-
-def check_single_link(line):
-    """Функция для проверки одной ссылки (для потоков)"""
-    try:
-        parsed = urlparse(line)
-        params = parse_qs(parsed.query)
+        p = urlparse(link)
+        qs = parse_qs(p.query)
+        if qs.get('security', [''])[0].lower() != 'reality': return None
+        host, port = p.hostname, int(p.port) if p.port else 443
+        if not is_tcp_reachable(host, port): return None
         
-        # Базовые фильтры протокола
-        is_tcp = params.get('type', [''])[0].lower() == 'tcp'
-        is_reality = params.get('security', [''])[0].lower() == 'reality'
-        
-        if not (is_tcp and is_reality):
-            return None
+        return {
+            "type": "vless",
+            "tag": unquote(p.fragment) or host,
+            "server": host,
+            "server_port": port,
+            "uuid": p.username,
+            "packet_encoding": "xudp",
+            "tls": {
+                "enabled": True,
+                "server_name": qs.get('sni', [''])[0],
+                "utls": {"enabled": True, "fingerprint": qs.get('fp', ['chrome'])[0]},
+                "reality": {
+                    "enabled": True,
+                    "public_key": qs.get('pbk', [''])[0],
+                    "short_id": qs.get('sid', [''])[0]
+                }
+            }
+        }
+    except: return None
 
-        # Фильтр по странам в названии
-        target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
-        name = unquote(parsed.fragment).lower()
-        
-        if any(k in name for k in target_keywords):
-            host = parsed.hostname
-            port = int(parsed.port) if parsed.port else 443
-            
-            if is_tcp_reachable(host, port):
-                return line
-    except:
-        pass
-    return None
-
-def get_data_with_retry(url, retries=3):
-    for i in range(retries):
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            if i < retries - 1:
-                time.sleep(5)
-    return ""
-
-def run_git_command(command):
-    try:
-        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка Git: {e.stderr}")
-        raise
-
-def update_repository(content, count):
-    with open(FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(content)
+def generate_full_config(nodes):
+    """Создает структуру Sing-box с балансировщиком и DNS"""
+    tags = [n["tag"] for n in nodes]
     
-    try:
-        run_git_command('git config --global user.name "github-actions[bot]"')
-        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
-        run_git_command(f'git add {FILE_PATH}')
-        
-        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
-        if not status:
-            print("Изменений нет.")
-            return
+    # Группируем теги для спец-задач
+    ai_tags = [t for t in tags if any(x in t.lower() for x in ["us", "sg", "nl", "usa", "singapore"])]
 
-        run_git_command(f'git commit -m "Auto-update: {count} verified links"')
-        run_git_command('git push')
-        print(f"✅ Успешно обновлено: {count} конфигов")
-    except Exception as e:
-        print(f"❌ Ошибка Git: {e}")
+    config = {
+        "log": {"level": "info"},
+        "dns": {
+            "servers": [
+                {"tag": "dns-remote", "address": "https://8.8.8.8/dns-query", "detour": "🚀 AUTO-BALANCER"},
+                {"tag": "dns-direct", "address": "8.8.8.8", "detour": "direct"}
+            ],
+            "rules": [{"outbound": "any", "server": "dns-remote"}]
+        },
+        "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080, "sniff": True}],
+        "outbounds": [
+            # ГЛАВНЫЙ БАЛАНСИРОВЩИК (URL-Test)
+            {
+                "type": "urltest",
+                "tag": "🚀 AUTO-BALANCER",
+                "outbounds": tags[:50], # Топ-50 серверов
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": "1m",
+                "tolerance": 50
+            },
+            # БАЛАНСИРОВЩИК ДЛЯ ИИ
+            {
+                "type": "urltest",
+                "tag": "🤖 AI-BALANCER",
+                "outbounds": ai_tags[:15] if ai_tags else tags[:15],
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": "5m"
+            },
+            {"type": "direct", "tag": "direct"},
+            {"type": "dns", "tag": "dns-out"}
+        ] + nodes,
+        "route": {
+            "rules": [
+                {"protocol": "dns", "outbound": "dns-out"},
+                {"domain_suffix": ["openai.com", "chatgpt.com", "anthropic.com", "claude.ai"], "outbound": "🤖 AI-BALANCER"},
+                {"domain_suffix": ["youtube.com", "googlevideo.com", "ytimg.com", "t.me", "telegram.org"], "outbound": "🚀 AUTO-BALANCER"}
+            ],
+            "final": "🚀 AUTO-BALANCER",
+            "auto_detect_interface": True
+        }
+    }
+    return json.dumps(config, indent=2, ensure_ascii=False)
 
 def main():
     raw_links = []
-
-    # 1. Сбор всех ссылок из всех источников
     for url in SOURCE_URLS:
-        print(f"Скачивание: {url}")
-        data = get_data_with_retry(url)
-        if data:
-            decoded = decode_base64(data)
-            for line in decoded.splitlines():
-                line = line.strip()
-                if line.startswith("vless://"):
-                    raw_links.append(line)
+        try:
+            res = requests.get(url, timeout=15)
+            data = res.text
+            if "vless://" not in data:
+                try: data = base64.b64decode(data).decode('utf-8')
+                except: pass
+            for line in data.splitlines():
+                if line.strip().startswith("vless://"): raw_links.append(line.strip())
+        except: continue
 
-    # Удаляем дубликаты перед проверкой, чтобы не тратить время
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
+    print(f"Найдено {len(unique_raw)} ссылок. Проверка...")
 
-    # 2. Параллельная проверка
-    verified_links = []
+    valid_nodes = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Запускаем задачи
-        future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
+        futures = [executor.submit(vless_to_outbound, link) for link in unique_raw]
+        for future in as_completed(futures):
+            res = future.result()
+            if res: valid_nodes.append(res)
+
+    if valid_nodes:
+        full_json = generate_full_config(valid_nodes)
+        with open(CONFIG_FILENAME, "w", encoding="utf-8") as f:
+            f.write(full_json)
         
-        completed = 0
-        for future in as_completed(future_to_link):
-            result = future.result()
-            if result:
-                verified_links.append(result)
-            
-            completed += 1
-            if completed % 50 == 0:
-                print(f"Проверено: {completed}/{len(unique_raw)}...")
-
-    print(f"Проверка завершена. Живых конфигов: {len(verified_links)}")
-
-    if not verified_links:
-        print("Нет рабочих конфигов.")
-        return
-
-    content = "\n".join(verified_links)
-    update_repository(content, len(verified_links))
+        try:
+            subprocess.run('git config --global user.name "github-actions[bot]"', shell=True)
+            subprocess.run('git config --global user.email "github-actions[bot]@users.noreply.github.com"', shell=True)
+            subprocess.run(f'git add {CONFIG_FILENAME}', shell=True)
+            subprocess.run('git commit -m "Update Smart Balancer JSON"', shell=True)
+            subprocess.run('git push', shell=True)
+            print("✅ Балансировщик готов!")
+        except: pass
 
 if __name__ == "__main__":
     main()
