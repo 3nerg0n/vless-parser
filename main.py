@@ -58,7 +58,7 @@ def check_single_link(line):
             return None
 
         # Фильтр по странам в названии
-        target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇱🇻", "latvia", "🇫🇮", "finland", "RU", "russia"]
+        target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "RU", "russia"]
         name = unquote(parsed.fragment).lower()
         
         if any(k in name for k in target_keywords):
