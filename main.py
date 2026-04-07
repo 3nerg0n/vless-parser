@@ -22,6 +22,15 @@ SOURCE_URLS = [
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 20  # Количество одновременных потоков проверки
 
+# Список разрешенных префиксов IP-адресов
+ALLOWED_IP_PREFIXES = [
+    "217.16", "84.201", "51.250", "78.159", "81.200",
+    "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
+]
+
+# Ключевые слова для фильтрации по названию
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "RU", "russia"]
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
@@ -50,19 +59,26 @@ def check_single_link(line):
         parsed = urlparse(line)
         params = parse_qs(parsed.query)
         
-        # Базовые фильтры протокола
+        # 1. Базовые фильтры протокола
         is_tcp = params.get('type', [''])[0].lower() == 'tcp'
         is_reality = params.get('security', [''])[0].lower() == 'reality'
         
         if not (is_tcp and is_reality):
             return None
 
-        # Фильтр по странам в названии
-        target_keywords = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "RU", "russia"]
+        host = parsed.hostname
+        if not host:
+            return None
+
+        # 2. Проверка по названию (фрагмент после #)
         name = unquote(parsed.fragment).lower()
+        match_by_name = any(k in name for k in TARGET_KEYWORDS)
         
-        if any(k in name for k in target_keywords):
-            host = parsed.hostname
+        # 3. Проверка по началу IP-адреса
+        match_by_ip = any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES)
+        
+        # Если подходит либо по имени, либо по IP
+        if match_by_name or match_by_ip:
             port = int(parsed.port) if parsed.port else 443
             
             if is_tcp_reachable(host, port):
@@ -123,14 +139,13 @@ def main():
                 if line.startswith("vless://"):
                     raw_links.append(line)
 
-    # Удаляем дубликаты перед проверкой, чтобы не тратить время
+    # Удаляем дубликаты перед проверкой
     unique_raw = list(dict.fromkeys(raw_links))
     print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
 
     # 2. Параллельная проверка
     verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Запускаем задачи
         future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
         
         completed = 0
