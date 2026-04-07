@@ -20,23 +20,22 @@ SOURCE_URLS = [
     "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
-MAX_WORKERS = 20  # Количество одновременных потоков проверки
+MAX_WORKERS = 30 
 
-# Список разрешенных префиксов IP-адресов
+# 1. Список разрешенных стран (ключевые слова в названии)
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland"]
+
+# 2. Список разрешенных префиксов IP (только для тех, кто прошел фильтр по стране)
 ALLOWED_IP_PREFIXES = [
     "217.16", "84.201", "51.250", "78.159", "81.200",
     "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
 ]
-
-# Ключевые слова для фильтрации по названию
-TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland"]
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def is_tcp_reachable(host, port, timeout=3):
-    """Проверяет, открыт ли TCP порт"""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -54,35 +53,36 @@ def decode_base64(data):
         return data
 
 def check_single_link(line):
-    """Функция для проверки одной ссылки (для потоков)"""
+    """Последовательная фильтрация: Протокол -> Страна -> IP -> Доступность"""
     try:
         parsed = urlparse(line)
         params = parse_qs(parsed.query)
         
-        # 1. Базовые фильтры протокола
+        # Шаг 1: Проверка протокола
         is_tcp = params.get('type', [''])[0].lower() == 'tcp'
         is_reality = params.get('security', [''])[0].lower() == 'reality'
-        
         if not (is_tcp and is_reality):
             return None
 
+        # Шаг 2: Фильтрация по стране (название в фрагменте #)
+        name = unquote(parsed.fragment).lower()
+        if not any(k in name for k in TARGET_KEYWORDS):
+            return None # Если страны нет в названии, отбрасываем сразу
+
+        # Шаг 3: Фильтрация по IP (среди тех, кто прошел проверку страны)
         host = parsed.hostname
         if not host:
             return None
-
-        # 2. Проверка по названию (фрагмент после #)
-        name = unquote(parsed.fragment).lower()
-        match_by_name = any(k in name for k in TARGET_KEYWORDS)
-        
-        # 3. Проверка по началу IP-адреса
-        match_by_ip = any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES)
-        
-        # Если подходит либо по имени, либо по IP
-        if match_by_name or match_by_ip:
-            port = int(parsed.port) if parsed.port else 443
             
-            if is_tcp_reachable(host, port):
-                return line
+        # Проверяем, начинается ли хост на один из разрешенных префиксов
+        if not any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
+            return None # Если IP не подходит, отбрасываем
+
+        # Шаг 4: Проверка порта (финальная проверка живой/мертвый)
+        port = int(parsed.port) if parsed.port else 443
+        if is_tcp_reachable(host, port):
+            return line
+            
     except:
         pass
     return None
@@ -90,12 +90,12 @@ def check_single_link(line):
 def get_data_with_retry(url, retries=3):
     for i in range(retries):
         try:
-            response = requests.get(url, headers=HEADERS, timeout=30)
+            response = requests.get(url, headers=HEADERS, timeout=20)
             response.raise_for_status()
             return response.text
-        except Exception as e:
+        except:
             if i < retries - 1:
-                time.sleep(5)
+                time.sleep(2)
     return ""
 
 def run_git_command(command):
@@ -103,7 +103,6 @@ def run_git_command(command):
         subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         print(f"Ошибка Git: {e.stderr}")
-        raise
 
 def update_repository(content, count):
     with open(FILE_PATH, "w", encoding="utf-8") as f:
@@ -119,7 +118,7 @@ def update_repository(content, count):
             print("Изменений нет.")
             return
 
-        run_git_command(f'git commit -m "Auto-update: {count} verified links"')
+        run_git_command(f'git commit -m "Auto-update: {count} verified links (Country + IP filter)"')
         run_git_command('git push')
         print(f"✅ Успешно обновлено: {count} конфигов")
     except Exception as e:
@@ -128,7 +127,6 @@ def update_repository(content, count):
 def main():
     raw_links = []
 
-    # 1. Сбор всех ссылок из всех источников
     for url in SOURCE_URLS:
         print(f"Скачивание: {url}")
         data = get_data_with_retry(url)
@@ -139,11 +137,9 @@ def main():
                 if line.startswith("vless://"):
                     raw_links.append(line)
 
-    # Удаляем дубликаты перед проверкой
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю мультипроверку в {MAX_WORKERS} потоков...")
+    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю строгую фильтрацию...")
 
-    # 2. Параллельная проверка
     verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
@@ -155,13 +151,13 @@ def main():
                 verified_links.append(result)
             
             completed += 1
-            if completed % 50 == 0:
+            if completed % 100 == 0:
                 print(f"Проверено: {completed}/{len(unique_raw)}...")
 
-    print(f"Проверка завершена. Живых конфигов: {len(verified_links)}")
+    print(f"Фильтрация завершена. Найдено подходящих и живых: {len(verified_links)}")
 
     if not verified_links:
-        print("Нет рабочих конфигов.")
+        print("Нет конфигов, соответствующих обоим условиям (Страна + IP).")
         return
 
     content = "\n".join(verified_links)
