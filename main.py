@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
-    "https://gitverse.ru/api/repos/nloverx/EtoNeYa_Subs/raw/branch/master/1",
+    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/1",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
