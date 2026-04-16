@@ -9,26 +9,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
-    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/1",
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
     "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-    "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
-    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
-    "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
+    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/1",
+    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
+    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 30 
 
 # 1. Список разрешенных стран (ключевые слова в названии)
-TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland"]
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "🇯🇵", "japan", "🇦🇹", "austria", "🇹🇷", "Turkey", "🇵🇱", "poland", "🇺🇸", "USA", "lv", "latvia"]
 
 # 2. Список разрешенных префиксов IP (только для тех, кто прошел фильтр по стране)
 ALLOWED_IP_PREFIXES = [
-    "217.16", "84.201", "51.250", "78.159", "81.200",
-    "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
+    "146.185", "185.126", "95.85", "140.83", "152.53", "47.245", "198.105", "45.194", "8.6", "158.160", "95.163", "212.233", "104.21", "172.67"
 ]
 
 HEADERS = {
