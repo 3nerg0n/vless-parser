@@ -21,18 +21,21 @@ SOURCE_URLS = [
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 40 
 
-# Ключевые слова для определения страны в названии
+# Ключевые слова для определения страны
 COUNTRY_MAP = {
     "germany": "🇩🇪 Germany",
     "🇩🇪": "🇩🇪 Germany",
     "netherlands": "🇳🇱 Netherlands",
     "🇳🇱": "🇳🇱 Netherlands",
     "finland": "🇫🇮 Finland",
-    "🇫🇮": "🇫🇮 Finland"
+    "🇫🇮": "🇫🇮 Finland",
+    "russia": "🇷🇺 Russia",
+    "ru": "🇷🇺 Russia",
+    "🇷🇺": "🇷🇺 Russia"
 }
 
-# Ваши префиксы IP (автоматически помечаем как RU)
-RU_IP_PREFIXES = [
+# Ваши префиксы IP
+ALLOWED_IP_PREFIXES = [
     "217.16", "84.201", "51.250", "78.159", "81.200",
     "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
 ]
@@ -60,8 +63,19 @@ def decode_base64(data):
     except:
         return data
 
+def get_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            return response.text
+        except:
+            if i < retries - 1:
+                time.sleep(2)
+    return ""
+
 def check_single_link(line):
-    """Проверка и фильтрация"""
+    """Проверка: Страна -> IP -> Доступность"""
     try:
         line = line.strip()
         if "://" not in line: return None
@@ -70,10 +84,7 @@ def check_single_link(line):
         host = parsed.hostname
         if not host: return None
 
-        # 1. Проверка по IP префиксам
-        is_ru_ip = any(host.startswith(prefix) for prefix in RU_IP_PREFIXES)
-        
-        # 2. Проверка по названию страны
+        # 1. Определяем страну по названию
         name_lower = unquote(parsed.fragment).lower()
         found_country = None
         for key, val in COUNTRY_MAP.items():
@@ -81,69 +92,99 @@ def check_single_link(line):
                 found_country = val
                 break
         
-        # Если это не наш целевой IP и в названии нет нужной страны - пропускаем
-        if not is_ru_ip and not found_country:
+        # 2. Проверяем IP префикс
+        is_allowed_ip = any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES)
+        
+        # Если страна не подошла И IP не из списка — отбрасываем
+        if not found_country and not is_allowed_ip:
             return None
 
         # 3. Проверка порта
         port = parsed.port if parsed.port else 443
         if is_tcp_reachable(host, port):
-            # Возвращаем кортеж: (сама ссылка, IP хоста, определенная страна)
-            # Если IP наш, а страна не нашлась в названии, ставим RU
-            final_country = found_country if found_country else "🇷🇺 Russia"
-            return (line, host, final_country)
+            # Если IP наш, а страна в названии не указана, помечаем как Russia
+            final_label = found_country if found_country else "🇷🇺 Russia"
+            return (line, host, final_label)
     except:
         pass
     return None
+
+def run_git_command(command):
+    try:
+        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Ошибка Git: {e.stderr}")
+
+def update_repository(content, count):
+    """Запись в файл и пуш в репозиторий"""
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    try:
+        run_git_command('git config --global user.name "github-actions[bot]"')
+        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+        run_git_command(f'git add {FILE_PATH}')
+        
+        # Проверка изменений
+        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
+        if not status:
+            print("Изменений в файле нет, пуш не требуется.")
+            return
+
+        run_git_command(f'git commit -m "Auto-update: {count} balanced configs"')
+        run_git_command('git push')
+        print(f"✅ Успешно обновлено и отправлено: {count} конфигов")
+    except Exception as e:
+        print(f"❌ Ошибка при обновлении репозитория: {e}")
 
 def main():
     raw_links = []
     for url in SOURCE_URLS:
         print(f"Скачивание: {url}")
-        data = requests.get(url, headers=HEADERS, timeout=20).text
+        data = get_data_with_retry(url)
         if data:
             decoded = decode_base64(data)
             for line in decoded.splitlines():
-                if "://" in line: raw_links.append(line)
+                if "://" in line:
+                    raw_links.append(line.strip())
 
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} ссылок. Проверка и балансировка...")
+    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю проверку...")
 
     verified_results = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(check_single_link, link) for link in unique_raw]
         for future in as_completed(futures):
             res = future.result()
-            if res: verified_results.append(res)
+            if res:
+                verified_results.append(res)
 
-    # --- БАЛАНСЕР (Группировка и переименование) ---
-    # Используем словарь, чтобы оставить только одну уникальную ссылку на один IP
+    # --- БАЛАНСЕР (Дедупликация по IP и переименование) ---
     unique_ips = {}
-    for link, host, country in verified_results:
+    for link, host, label in verified_results:
         if host not in unique_ips:
-            unique_ips[host] = (link, country)
+            unique_ips[host] = (link, label)
 
     balanced_links = []
     counter = 1
-    for host, (link, country) in unique_ips.items():
-        # Разбираем ссылку, чтобы заменить фрагмент (название)
+    for host, (link, label) in unique_ips.items():
         parsed = urlparse(link)
-        # Формируем новое имя: "Страна | Balancer #1"
-        new_fragment = f"{country} | Balancer #{counter}"
-        
-        # Собираем ссылку обратно с новым именем
-        new_link = urlunparse(parsed._replace(fragment=new_fragment))
+        # Создаем новое имя для балансера
+        new_name = f"{label} | Balancer #{counter}"
+        # Собираем ссылку обратно с новым фрагментом
+        new_link = urlunparse(parsed._replace(fragment=new_name))
         balanced_links.append(new_link)
         counter += 1
 
-    print(f"Готово! После балансировки осталось {len(balanced_links)} уникальных серверов.")
+    print(f"Фильтрация завершена. Живых уникальных серверов: {len(balanced_links)}")
 
-    if balanced_links:
-        content = "\n".join(balanced_links)
-        with open(FILE_PATH, "w", encoding="utf-8") as f:
-            f.write(content)
-        # Здесь можно вызвать вашу функцию update_repository(content, len(balanced_links))
-        print(f"Файл {FILE_PATH} обновлен.")
+    if not balanced_links:
+        print("Нет конфигов для записи.")
+        return
+
+    # Записываем и пушим
+    final_content = "\n".join(balanced_links)
+    update_repository(final_content, len(balanced_links))
 
 if __name__ == "__main__":
     main()
