@@ -4,7 +4,7 @@ import base64
 import time
 import subprocess
 import socket
-from urllib.parse import urlparse, parse_qs, unquote, urlunparse
+from urllib.parse import urlparse, parse_qs, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
@@ -19,28 +19,22 @@ SOURCE_URLS = [
     "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
-MAX_WORKERS = 50 
+MAX_WORKERS = 40 # Можно еще увеличить, так как проверок стало меньше
 
-# Префиксы IP для фильтрации
+# 1. Фильтр по странам (в названии ссылки после #)
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland"]
+
+# 2. Фильтр по IP (только для тех, кто прошел фильтр по стране)
 ALLOWED_IP_PREFIXES = [
-    "217.16", "84.201", "51.250", "78.159", "81.200",
-    "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
+    "51.250", "158.160"
 ]
 
-# Ключевые слова стран для фильтрации и именования
-COUNTRY_MAP = {
-    "germany": "🇩🇪 Germany",
-    "🇩🇪": "🇩🇪 Germany",
-    "netherlands": "🇳🇱 Netherlands",
-    "🇳🇱": "🇳🇱 Netherlands",
-    "finland": "🇫🇮 Finland",
-    "🇫🇮": "🇫🇮 Finland",
-    "russia": "🇷🇺 Russia",
-    "ru": "🇷🇺 Russia",
-    "🇷🇺": "🇷🇺 Russia"
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-def is_tcp_reachable(host, port, timeout=2):
+def is_tcp_reachable(host, port, timeout=3):
+    """Проверка доступности порта"""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -50,109 +44,136 @@ def is_tcp_reachable(host, port, timeout=2):
 def decode_base64(data):
     data = data.strip()
     try:
-        if "://" in data: return data
+        # Проверка, не является ли это уже ссылкой (не base64)
+        if any(data.startswith(p) for p in ["vless://", "vmess://", "ss://", "trojan://"]):
+            return data
+        
         missing_padding = len(data) % 4
-        if missing_padding: data += '=' * (4 - missing_padding)
+        if missing_padding:
+            data += '=' * (4 - missing_padding)
         return base64.b64decode(data).decode('utf-8')
-    except: return data
+    except:
+        return data
 
-def check_and_format_link(line):
-    """Проверяет фильтры и возвращает кортеж (ссылка, хост, страна)"""
+def check_single_link(line):
+    """Универсальная фильтрация для любого протокола"""
     try:
+        # Убираем лишние пробелы
         line = line.strip()
-        if "://" not in line: return None
-        
-        parsed = urlparse(line)
-        host = parsed.hostname
-        if not host: return None
-
-        # 1. Фильтр по стране в названии
-        name_lower = unquote(parsed.fragment).lower()
-        found_country = None
-        for key, val in COUNTRY_MAP.items():
-            if key in name_lower:
-                found_country = val
-                break
-        
-        # 2. Фильтр по IP
-        is_allowed_ip = any(host.startswith(p) for p in ALLOWED_IP_PREFIXES)
-
-        # Если не подошла страна И не подошел IP — отбрасываем
-        if not found_country and not is_allowed_ip:
+        if not line or "://" not in line:
             return None
 
-        # 3. Проверка порта
-        port = int(parsed.port) if parsed.port else 443
+        parsed = urlparse(line)
+        
+        # Шаг 1: Фильтрация по стране (название в фрагменте #)
+        # unquote декодирует спецсимволы и эмодзи
+        name = unquote(parsed.fragment).lower()
+        if not any(k in name for k in TARGET_KEYWORDS):
+            return None
+
+        # Шаг 2: Фильтрация по IP
+        host = parsed.hostname
+        
+        # Обработка vmess:// (они часто зашифрованы целиком в base64)
+        # Если hostname не определился стандартным парсером
+        if not host:
+            return None
+            
+        if not any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
+            return None
+
+        # Шаг 3: Проверка доступности
+        # Если порт не указан, пробуем стандартный 443
+        port = 443
+        try:
+            if parsed.port:
+                port = int(parsed.port)
+        except:
+            pass
+            
         if is_tcp_reachable(host, port):
-            # Если IP наш, а страна не определена — ставим Russia
-            label = found_country if found_country else "🇷🇺 Russia"
-            return (line, host, label)
+            return line
+            
     except:
         pass
     return None
 
+def get_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            return response.text
+        except:
+            if i < retries - 1:
+                time.sleep(2)
+    return ""
+
 def run_git_command(command):
-    try: subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
-    except: pass
+    try:
+        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        pass
+
+def update_repository(content, count):
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+    
+    try:
+        run_git_command('git config --global user.name "github-actions[bot]"')
+        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+        run_git_command(f'git add {FILE_PATH}')
+        
+        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
+        if not status:
+            print("Изменений нет.")
+            return
+
+        run_git_command(f'git commit -m "Auto-update: {count} mixed configs (Country + IP filter)"')
+        run_git_command('git push')
+        print(f"✅ Успешно обновлено: {count} конфигов")
+    except Exception as e:
+        print(f"❌ Ошибка Git: {e}")
 
 def main():
-    all_raw_links = []
+    raw_links = []
+
     for url in SOURCE_URLS:
-        print(f"Загрузка: {url}")
-        try:
-            resp = requests.get(url, timeout=15)
-            data = decode_base64(resp.text)
-            for line in data.splitlines():
+        print(f"Скачивание: {url}")
+        data = get_data_with_retry(url)
+        if data:
+            # Декодируем содержимое (поддерживает и чистый текст, и base64 подписки)
+            decoded = decode_base64(data)
+            for line in decoded.splitlines():
+                line = line.strip()
                 if "://" in line:
-                    all_raw_links.append(line.strip())
-        except: continue
+                    raw_links.append(line)
 
-    unique_links = list(dict.fromkeys(all_raw_links))
-    print(f"Найдено {len(unique_links)} ссылок. Проверка...")
+    unique_raw = list(dict.fromkeys(raw_links))
+    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю фильтрацию по странам и IP...")
 
-    valid_results = []
+    verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(check_and_format_link, link) for link in unique_links]
-        for future in as_completed(futures):
-            res = future.result()
-            if res: valid_results.append(res)
+        future_to_link = {executor.submit(check_single_link, link): link for link in unique_raw}
+        
+        completed = 0
+        for future in as_completed(future_to_link):
+            result = future.result()
+            if result:
+                verified_links.append(result)
+            
+            completed += 1
+            if completed % 100 == 0:
+                print(f"Проверено: {completed}/{len(unique_raw)}...")
 
-    if not valid_results:
-        print("Рабочих серверов не найдено.")
+    print(f"Фильтрация завершена. Найдено подходящих: {len(verified_links)}")
+
+    if not verified_links:
+        print("Нет конфигов, соответствующих фильтрам.")
         return
 
-    # Группировка (Балансировка): оставляем уникальные IP и переименовываем
-    unique_ips = {}
-    for link, host, label in valid_results:
-        if host not in unique_ips:
-            unique_ips[host] = (link, label)
-
-    final_links = []
-    counter = 1
-    for host, (link, label) in unique_ips.items():
-        parsed = urlparse(link)
-        # Создаем красивое имя для балансера
-        new_fragment = f"{label} | Balancer #{counter}"
-        # Собираем ссылку обратно
-        new_link = urlunparse(parsed._replace(fragment=new_fragment))
-        final_links.append(new_link)
-        counter += 1
-
-    # --- СЕКРЕТ УСПЕХА ДЛЯ STREISAND ---
-    # Объединяем все ссылки через новую строку и кодируем ВЕСЬ файл в Base64
-    sub_content = "\n".join(final_links)
-    encoded_sub = base64.b64encode(sub_content.encode('utf-8')).decode('utf-8')
-
-    with open(FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(encoded_sub)
-    
-    # Отправка в репозиторий
-    run_git_command('git config --global user.name "github-actions[bot]"')
-    run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
-    run_git_command(f'git add {FILE_PATH}')
-    run_git_command(f'git commit -m "Update Balancer Sub: {len(final_links)} nodes"')
-    run_git_command('git push')
-    print(f"✅ Подписка обновлена! Добавлено {len(final_links)} серверов.")
+    content = "\n".join(verified_links)
+    update_repository(content, len(verified_links))
 
 if __name__ == "__main__":
     main()
