@@ -4,7 +4,8 @@ import base64
 import time
 import subprocess
 import socket
-from urllib.parse import urlparse, parse_qs, unquote, urlunparse
+import yaml # Если в окружении нет PyYAML, можно формировать строку вручную, я сделаю вручную для надежности
+from urllib.parse import urlparse, parse_qs, unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
@@ -19,32 +20,18 @@ SOURCE_URLS = [
     "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
-MAX_WORKERS = 40 
+MAX_WORKERS = 50 
 
-# Ключевые слова для определения страны
-COUNTRY_MAP = {
-    "germany": "🇩🇪 Germany",
-    "🇩🇪": "🇩🇪 Germany",
-    "netherlands": "🇳🇱 Netherlands",
-    "🇳🇱": "🇳🇱 Netherlands",
-    "finland": "🇫🇮 Finland",
-    "🇫🇮": "🇫🇮 Finland",
-    "russia": "🇷🇺 Russia",
-    "ru": "🇷🇺 Russia",
-    "🇷🇺": "🇷🇺 Russia"
-}
-
-# Ваши префиксы IP
+# Префиксы IP для фильтрации
 ALLOWED_IP_PREFIXES = [
     "217.16", "84.201", "51.250", "78.159", "81.200",
     "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
 ]
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
+# Ключевые слова стран
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "ru", "russia"]
 
-def is_tcp_reachable(host, port, timeout=3):
+def is_tcp_reachable(host, port, timeout=2):
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -54,137 +41,120 @@ def is_tcp_reachable(host, port, timeout=3):
 def decode_base64(data):
     data = data.strip()
     try:
-        if any(data.startswith(p) for p in ["vless://", "vmess://", "ss://", "trojan://"]):
-            return data
+        if "://" in data: return data
         missing_padding = len(data) % 4
-        if missing_padding:
-            data += '=' * (4 - missing_padding)
+        if missing_padding: data += '=' * (4 - missing_padding)
         return base64.b64decode(data).decode('utf-8')
-    except:
-        return data
+    except: return data
 
-def get_data_with_retry(url, retries=3):
-    for i in range(retries):
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=20)
-            response.raise_for_status()
-            return response.text
-        except:
-            if i < retries - 1:
-                time.sleep(2)
-    return ""
-
-def check_single_link(line):
-    """Проверка: Страна -> IP -> Доступность"""
+def parse_vless(link):
+    """Парсит vless ссылку в словарь для Clash"""
     try:
-        line = line.strip()
-        if "://" not in line: return None
+        parsed = urlparse(link)
+        if parsed.scheme != 'vless': return None
         
-        parsed = urlparse(line)
+        params = parse_qs(parsed.query)
         host = parsed.hostname
-        if not host: return None
+        port = int(parsed.port) if parsed.port else 443
+        uuid = parsed.username
+        
+        # Фильтр по IP
+        if not any(host.startswith(p) for p in ALLOWED_IP_PREFIXES):
+            # Если IP не в списке, проверяем страну в названии
+            name = unquote(parsed.fragment).lower()
+            if not any(k in name for k in TARGET_KEYWORDS):
+                return None
 
-        # 1. Определяем страну по названию
-        name_lower = unquote(parsed.fragment).lower()
-        found_country = None
-        for key, val in COUNTRY_MAP.items():
-            if key in name_lower:
-                found_country = val
-                break
-        
-        # 2. Проверяем IP префикс
-        is_allowed_ip = any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES)
-        
-        # Если страна не подошла И IP не из списка — отбрасываем
-        if not found_country and not is_allowed_ip:
+        # Проверка доступности
+        if not is_tcp_reachable(host, port):
             return None
 
-        # 3. Проверка порта
-        port = parsed.port if parsed.port else 443
-        if is_tcp_reachable(host, port):
-            # Если IP наш, а страна в названии не указана, помечаем как Russia
-            final_label = found_country if found_country else "🇷🇺 Russia"
-            return (line, host, final_label)
+        # Формируем структуру для Clash
+        config = {
+            "name": f"Srv-{host}-{port}-" + str(time.time())[-4:],
+            "type": "vless",
+            "server": host,
+            "port": port,
+            "uuid": uuid,
+            "cipher": "auto",
+            "tls": params.get('security', [''])[0] == 'reality',
+            "servername": params.get('sni', [''])[0],
+            "network": params.get('type', ['tcp'])[0],
+            "reality-opts": {
+                "public-key": params.get('pbk', [''])[0],
+                "short-id": params.get('sid', [''])[0]
+            },
+            "client-fingerprint": params.get('fp', ['chrome'])[0]
+        }
+        return config
     except:
-        pass
-    return None
+        return None
+
+def generate_clash_yaml(proxies):
+    """Создает текст конфига Clash с балансировщиком"""
+    proxy_names = [p['name'] for p in proxies]
+    
+    yaml_text = "proxies:\n"
+    for p in proxies:
+        yaml_text += f"  - {{ name: \"{p['name']}\", type: vless, server: {p['server']}, port: {p['port']}, uuid: {p['uuid']}, cipher: auto, tls: true, servername: {p['servername']}, network: {p['network']}, reality-opts: {{ public-key: {p['reality-opts']['public-key']}, short-id: {p['reality-opts']['short-id']} }}, client-fingerprint: {p['client-fingerprint']} }}\n"
+
+    yaml_text += "\nproxy-groups:\n"
+    # Группа авто-выбора (URL-Test) - это и есть твой балансер
+    yaml_text += "  - name: \"🚀 БАЛАНСЕР (Авто-выбор)\"\n"
+    yaml_text += "    type: url-test\n"
+    yaml_text += "    url: http://www.gstatic.com/generate_204\n"
+    yaml_text += "    interval: 300\n"
+    yaml_text += "    proxies:\n"
+    for name in proxy_names:
+        yaml_text += f"      - \"{name}\"\n"
+    
+    yaml_text += "\nrules:\n  - MATCH,🚀 БАЛАНСЕР (Авто-выбор)\n"
+    return yaml_text
 
 def run_git_command(command):
-    try:
-        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка Git: {e.stderr}")
-
-def update_repository(content, count):
-    """Запись в файл и пуш в репозиторий"""
-    with open(FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(content)
-    
-    try:
-        run_git_command('git config --global user.name "github-actions[bot]"')
-        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
-        run_git_command(f'git add {FILE_PATH}')
-        
-        # Проверка изменений
-        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
-        if not status:
-            print("Изменений в файле нет, пуш не требуется.")
-            return
-
-        run_git_command(f'git commit -m "Auto-update: {count} balanced configs"')
-        run_git_command('git push')
-        print(f"✅ Успешно обновлено и отправлено: {count} конфигов")
-    except Exception as e:
-        print(f"❌ Ошибка при обновлении репозитория: {e}")
+    try: subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
+    except: pass
 
 def main():
-    raw_links = []
+    all_links = []
     for url in SOURCE_URLS:
-        print(f"Скачивание: {url}")
-        data = get_data_with_retry(url)
-        if data:
-            decoded = decode_base64(data)
-            for line in decoded.splitlines():
-                if "://" in line:
-                    raw_links.append(line.strip())
+        print(f"Загрузка: {url}")
+        try:
+            resp = requests.get(url, timeout=15)
+            data = decode_base64(resp.text)
+            for line in data.splitlines():
+                if line.startswith("vless://"):
+                    all_links.append(line.strip())
+        except: continue
 
-    unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} уникальных ссылок. Начинаю проверку...")
+    unique_links = list(dict.fromkeys(all_links))
+    print(f"Найдено {len(unique_links)} ссылок. Проверка...")
 
-    verified_results = []
+    valid_proxies = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(check_single_link, link) for link in unique_raw]
+        futures = [executor.submit(parse_vless, link) for link in unique_links]
         for future in as_completed(futures):
             res = future.result()
-            if res:
-                verified_results.append(res)
+            if res: valid_proxies.append(res)
 
-    # --- БАЛАНСЕР (Дедупликация по IP и переименование) ---
-    unique_ips = {}
-    for link, host, label in verified_results:
-        if host not in unique_ips:
-            unique_ips[host] = (link, label)
-
-    balanced_links = []
-    counter = 1
-    for host, (link, label) in unique_ips.items():
-        parsed = urlparse(link)
-        # Создаем новое имя для балансера
-        new_name = f"{label} | Balancer #{counter}"
-        # Собираем ссылку обратно с новым фрагментом
-        new_link = urlunparse(parsed._replace(fragment=new_name))
-        balanced_links.append(new_link)
-        counter += 1
-
-    print(f"Фильтрация завершена. Живых уникальных серверов: {len(balanced_links)}")
-
-    if not balanced_links:
-        print("Нет конфигов для записи.")
+    if not valid_proxies:
+        print("Нет рабочих серверов.")
         return
 
-    # Записываем и пушим
-    final_content = "\n".join(balanced_links)
-    update_repository(final_content, len(balanced_links))
+    # Генерируем Clash конфиг
+    clash_config = generate_clash_yaml(valid_proxies)
+    
+    # Сохраняем
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(clash_config)
+    
+    # Пушим в репозиторий
+    run_git_command('git config --global user.name "github-actions[bot]"')
+    run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+    run_git_command(f'git add {FILE_PATH}')
+    run_git_command(f'git commit -m "Update Balancer: {len(valid_proxies)} nodes"')
+    run_git_command('git push')
+    print(f"✅ Балансер обновлен! Серверов внутри: {len(valid_proxies)}")
 
 if __name__ == "__main__":
     main()
