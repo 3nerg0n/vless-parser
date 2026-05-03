@@ -4,7 +4,7 @@ import base64
 import time
 import subprocess
 import socket
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
@@ -21,7 +21,6 @@ SOURCE_URLS = [
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 40 
 
-# Список разрешенных префиксов IP
 ALLOWED_IP_PREFIXES = [
     "217.16", "84.201", "51.250", "78.159", "81.200", 
     "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
@@ -55,29 +54,50 @@ def check_single_link(line):
         line = line.strip()
         if not line or "://" not in line:
             return None
-
         parsed = urlparse(line)
         host = parsed.hostname
-        
         if not host:
             return None
-            
-        # Фильтрация только по списку префиксов IP
         if not any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
             return None
-
-        port = 443
-        if parsed.port:
-            port = int(parsed.port)
-            
+        port = int(parsed.port) if parsed.port else 443
         if is_tcp_reachable(host, port):
             return line
-            
     except:
         pass
     return None
 
-# ... (Остальные функции get_data_with_retry, run_git_command, update_repository остаются без изменений) ...
+def get_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            response.raise_for_status()
+            return response.text
+        except:
+            if i < retries - 1:
+                time.sleep(2)
+    return ""
+
+def run_git_command(command):
+    try:
+        subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
+    except:
+        pass
+
+def update_repository(content, count):
+    with open(FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+    try:
+        run_git_command('git config --global user.name "github-actions[bot]"')
+        run_git_command('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+        run_git_command(f'git add {FILE_PATH}')
+        status = subprocess.run(f'git status --porcelain {FILE_PATH}', shell=True, capture_output=True, text=True).stdout.strip()
+        if not status:
+            return
+        run_git_command(f'git commit -m "Auto-update: {count} valid configs"')
+        run_git_command('git push')
+    except Exception as e:
+        print(f"Ошибка Git: {e}")
 
 def main():
     raw_links = []
@@ -92,7 +112,7 @@ def main():
                     raw_links.append(line)
 
     unique_raw = list(dict.fromkeys(raw_links))
-    print(f"Найдено {len(unique_raw)} ссылок. Начинаю проверку IP и TCP...")
+    print(f"Найдено {len(unique_raw)} ссылок. Фильтрация IP и TCP...")
 
     verified_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -102,7 +122,7 @@ def main():
             if result:
                 verified_links.append(result)
 
-    print(f"Готово. Найдено подходящих: {len(verified_links)}")
+    print(f"Готово. Доступно: {len(verified_links)}")
     if verified_links:
         update_repository("\n".join(verified_links), len(verified_links))
 
