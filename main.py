@@ -46,7 +46,7 @@ FILE_PATH = "sub_vless_3nerg0n_92sh81"
 MAX_WORKERS = 40 # Можно еще увеличить, так как проверок стало меньше
 
 # 1. Фильтр по странам (в названии ссылки после #)
-TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "SW", "sweden"]
+TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "🇸🇪", "sweden"]
 
 # 2. Фильтр по IP (только для тех, кто прошел фильтр по стране)
 ALLOWED_IP_PREFIXES = [
