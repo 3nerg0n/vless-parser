@@ -10,14 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt"
+    
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 40 
 
-ALLOWED_IP_PREFIXES = [
-    "217.16", "84.201", "51.250", "78.159", "81.200", 
-    "158.160", "5.188", "62.152", "109.120", "212.233", "87.239"
-]
+ALLOWED_IP_PREFIXES = []
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
