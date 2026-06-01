@@ -9,14 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
-    "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
-    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/1",
-    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
-    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist"
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 40 
