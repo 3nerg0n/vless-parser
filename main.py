@@ -9,14 +9,38 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- КОНФИГУРАЦИЯ ---
 SOURCE_URLS = [
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
     "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
-    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
-    "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
-    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/1",
-    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
-    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist"
+"https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
+"https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/wl.txt",
+"https://gist.github.com/DestroyST6767/50af50221ca1858ba2084efc0f524fbc.txt",
+"https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+"https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+"https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+"https://raw.githubusercontent.com/prominbro/sub/refs/heads/main/212.txt",
+"https://obwl.obprojects.lol/configs/configs.txt",
+"https://obwl.obprojects.lol/configs/selected.txt",
+"https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-all.txt",
+"https://drive.usercontent.google.com/download?id=1Rl6jIlf2Ula__J9F9nRmCuE6RFdqMTgk&export=download&confirm=t",
+"https://raw.githubusercontent.com/AirLinkVPN1/AirLinkVPN/refs/heads/main/rkn_white_list",
+"https://raw.githubusercontent.com/dequar/deqwl/refs/heads/main/deray.txt",
+"https://gitflic.ru/project/sigil/my-new-cool-project/blob/raw?file=whitelist",
+"https://raw.githubusercontent.com/gergew452/Generation-Liberty/refs/heads/main/githubmirror/best.txt",
+"https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
+"https://raw.githubusercontent.com/Sanuyyq/sub-storage1/refs/heads/main/bs.txt",
+"https://mifa.world/vless",
+"https://raw.githubusercontent.com/Temnuk/naabuzil/refs/heads/main/whitelist_full",
+"https://raw.githubusercontent.com/ewecrow78-gif/whitelist1/main/list.txt",
+"https://raw.githubusercontent.com/luxxuria/harvester/refs/heads/main/non_ru.txt",
+"https://raw.githubusercontent.com/ShatakVPN/ConfigForge-V2Ray/main/configs/ru/vless.txt",
+"https://subrostunnel.vercel.app/gen.txt",
+"https://subrostunnel.vercel.app/wl.txt",
+"https://rostunnel.vercel.app/mega.txt",
+"https://raw.githubusercontent.com/modrinthmodification-create/ownedvpn/main/subscription.txt",
+"https://github.com/ksenkovsolo/HardVPN-bypass-WhiteLists-/raw/refs/heads/main/vpn-lte/WHITELIST-ALL.txt",
+"https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt",
+"https://raw.githubusercontent.com/kort0881/vpn-checker-backend/refs/heads/main/checked/RU_Best/ru_white_all_WHITE.txt",
+"https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta6.txt",
+"https://gitverse.ru/api/repos/nloverx/EtoNeYa_Subs/raw/branch/master/whitelist"
 ]
 FILE_PATH = "sub_vless_3nerg0n_92sh81" 
 MAX_WORKERS = 40 # Можно еще увеличить, так как проверок стало меньше
