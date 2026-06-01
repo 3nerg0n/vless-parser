@@ -47,9 +47,8 @@ FILE_PATH = "sub_vless_3nerg0n_92sh81"
 MAX_WORKERS = 40
 
 # --- TELEGRAM CONFIG ---
-# Замените на ваши данные или используйте переменные окружения (Secrets в GitHub)
-TG_TOKEN = "ВАШ_ТОКЕН_БОТА"
-TG_CHAT_ID = "ВАШ_CHAT_ID"
+TG_TOKEN = os.getenv("TG_TOKEN")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
 TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "🇸🇪", "sweden"]
 ALLOWED_IP_PREFIXES = [
