@@ -49,9 +49,10 @@ MAX_WORKERS = 40 # Можно еще увеличить, так как пров�
 TARGET_KEYWORDS = ["🇩🇪", "germany", "🇳🇱", "netherlands", "🇫🇮", "finland", "🇸🇪", "sweden"]
 
 # 2. Фильтр по IP (только для тех, кто прошел фильтр по стране)
-#ALLOWED_IP_PREFIXES = [
-#    "51.250", "158.160"
-#]
+ALLOWED_IP_PREFIXES = [
+    "217.16", "84.201", "51.250", "78.159", "81.200", "158.160",
+    "5.188", "62.152", "109.120", "212.233", "87.239"
+]
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -95,16 +96,16 @@ def check_single_link(line):
         if not any(k in name for k in TARGET_KEYWORDS):
             return None
 
-#        # Шаг 2: Фильтрация по IP
-#        host = parsed.hostname
-#        
-#        # Обработка vmess:// (они часто зашифрованы целиком в base64)
-#        # Если hostname не определился стандартным парсером
-#        if not host:
-#            return None
-#            
-#        if not any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
-#            return None
+        # Шаг 2: Фильтрация по IP
+        host = parsed.hostname
+        
+        # Обработка vmess:// (они часто зашифрованы целиком в base64)
+        # Если hostname не определился стандартным парсером
+        if not host:
+            return None
+            
+        if not any(host.startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
+            return None
 
         # Шаг 3: Проверка доступности
         # Если порт не указан, пробуем стандартный 443
